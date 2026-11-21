@@ -98,7 +98,16 @@ class _Builder:
             for q in qubits:
                 if self.noise.meas(q) > 0:
                     self.c.append("X_ERROR", [q], self.noise.meas(q))
-        self.c.append("M", qubits)
+        if self.noise is not None and any(self.noise.meas_record(q) > 0 for q in qubits):
+            # Per-qubit classical misread; same record order as one M.
+            for q in qubits:
+                self.c.append("M", [q], self.noise.meas_record(q))
+        else:
+            self.c.append("M", qubits)
+        if self.noise is not None:
+            for q in qubits:
+                if self.noise.meas_state(q) > 0:
+                    self.c.append("X_ERROR", [q], self.noise.meas_state(q))
         if self.noise is not None and duration_idle:
             self._idle(set(qubits), self.noise.dur_meas)
         rec = {q: self.num_meas + i for i, q in enumerate(qubits)}

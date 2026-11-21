@@ -37,6 +37,13 @@ class NoiseModel:
     p2_pair: dict[frozenset, float] = field(default_factory=dict)
     p_meas_q: dict[int, float] = field(default_factory=dict)
     p_reset_q: dict[int, float] = field(default_factory=dict)
+    # Measured readout model (from experiments/characterize_measurement.py).
+    # p_meas above is a state flip BEFORE the measurement, which in a no-reset
+    # circuit persists into later rounds. Real readout has two separate parts:
+    # a classical misread that corrupts only the recorded bit (M(p) in Stim),
+    # and a real state change during the readout (|1> decay), which persists.
+    p_meas_record_q: dict[int, float] = field(default_factory=dict)
+    p_meas_state_q: dict[int, float] = field(default_factory=dict)
     # Idle noise. t1/t2 in microseconds; None disables idling errors.
     t1_q: dict[int, float] = field(default_factory=dict)
     t2_q: dict[int, float] = field(default_factory=dict)
@@ -128,6 +135,38 @@ class NoiseModel:
 
     def reset(self, q: int) -> float:
         return self.p_reset_q.get(q, self.p_reset)
+
+    def meas_record(self, q: int) -> float:
+        return self.p_meas_record_q.get(q, 0.0)
+
+    def meas_state(self, q: int) -> float:
+        return self.p_meas_state_q.get(q, 0.0)
+
+    def with_characterization(self, rows: list[dict], qubit_names: dict[int, str],
+                              floor: float = 1e-3) -> "NoiseModel":
+        """Copy of this model whose readout comes from the repeated-measurement
+        characterization (rows of characterize_measurement.analyze).
+
+        Per qubit: state_flip (a change confirmed before and after) becomes a
+        persisting state flip during readout; the remaining part of the
+        consecutive-outcome flip rate, flip ~ 2 p_record + p_state, becomes a
+        classical misread. The calibration-based pre-measurement flip is
+        removed for those qubits, since the two parts replace it.
+        """
+        from copy import deepcopy
+
+        m = deepcopy(self)
+        by_name = {r["qubit"]: r for r in rows}
+        for q, name in qubit_names.items():
+            r = by_name.get(name)
+            if r is None:
+                continue
+            p_state = max(r["state_flip"], floor)
+            p_record = max((r["flip"] - p_state) / 2, floor)
+            m.p_meas_state_q[q] = p_state
+            m.p_meas_record_q[q] = p_record
+            m.p_meas_q[q] = 0.0
+        return m
 
     def idle(self, q: int, duration_us: float) -> tuple[float, float, float] | None:
         """Pauli-twirled (px, py, pz) for idling `duration_us`, or None."""
