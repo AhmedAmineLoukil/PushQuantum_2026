@@ -143,13 +143,32 @@ rounds 1–5 × 1 000 shots each (`results/figures/dd_strategy_comparison.json`)
 
 ### E4. Pulse level (PulLA)
 `experiments/run_pulla.py` converts our transpiled circuits with `qiskit_to_pulla`,
-compiles them with PulLA's standard compiler (incl. the DD strategies above) and submits
-the playlist. Compilation works on our account, but **submission is refused**
-("Personal account does not have pulse-level access enabled"), so no pulse-level hardware
-data exists. The compiled schedules give Emerald's real timings for our circuit: PRX 24 ns,
-CZ 40 ns, **readout 1.04 µs**, initial relaxation wait 400 µs. The mid-circuit readout is
-~80 % of each syndrome round, which is why readout-time effects (E1) dominate the
-no-reset error budget.
+compiles them with PulLA's standard compiler (with the DD strategies of E3 set as compiler
+stages) and submits the pulse playlist. Pulse submission needs an organisation token with
+pulse-level access; a personal-account token is refused ("Personal account does not have
+pulse-level access enabled").
+
+Same calibration, same patch, rounds 1–5 × 1 000 shots each, submitted together
+(`results/figures/pulse_vs_circuit.json`):
+
+| path | ε_L, BP+OSD | ε_L, correlated MWPM | ε_L, no correction |
+|---|---|---|---|
+| circuit level (`backend.run`), standard DD | 2.61 ± 0.14 % | 2.85 ± 0.15 % | 8.27 % |
+| pulse level (PulLA), standard DD | 2.79 ± 0.15 % | 3.00 ± 0.15 % | 8.74 % |
+| pulse level (PulLA), dense DD | 2.56 ± 0.14 % | 2.71 ± 0.14 % | 7.91 % |
+
+* The pulse-level path works end to end and reproduces the circuit-level result. Detector
+  firing after round 1 is 0.078 vs 0.076, and all three rates agree within 1σ. This is
+  expected: with the standard compiler, PulLA produces the same pulse schedule the server
+  would.
+* Dense DD at pulse level is the lowest point, but the difference is not significant here
+  (≈ 1σ), consistent with E3.
+* The compiled schedules give Emerald's real timings for our circuit: PRX 24 ns, CZ 40 ns,
+  **readout 1.04 µs**, initial relaxation wait 400 µs. The mid-circuit readout is ~80 % of
+  each syndrome round, so the remaining error budget is dominated by readout-time effects
+  (E1). A pulse-level gain would therefore have to come from the readout itself (shorter
+  integration, |1⟩-protecting readout), which needs recalibrated discrimination and was
+  not attempted.
 
 ## Findings
 
@@ -239,7 +258,8 @@ hardware path (transpile → run → m2d → decode) gives ε_L ≈ 8.6 %.
   (3.5 % vs 2.8 %) 2 000 training shots per fold are too few at this error level.
 * The headline picks the best of 11 prior/decoder combinations; the spread on that data
   set is 2.6–3.5 % (Union-Find excluded: 3.2–3.3 %).
-* No pulse-level hardware data: the account can compile with PulLA but not submit pulse jobs (E4).
+* Pulse-level runs used PulLA's standard pulse shapes; no custom waveforms or readout
+  changes were tried (E4).
 * The simulation noise model still uses assumed durations (CZ 80 ns, readout 1.5 µs) rather
   than the compiled ones (40 ns, 1.04 µs) measured in E4.
 * Garnet calibration does not report readout QND-ness, so the QB11 mechanism is not
