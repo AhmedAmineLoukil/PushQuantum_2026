@@ -86,6 +86,71 @@ for Z (3.15 %). Figure: `results/figures/20261121-160049_emerald_X_ddon.png`.
   (e.g. Emerald X: MWPM 4.01 % calibrated vs 3.01 % SI1000), because calibration
   under-states the ancilla errors that dominate (see Finding 2).
 
+## Extensions
+
+### E1. Repeated-measurement characterization predicts which ancillas fail
+`experiments/characterize_measurement.py`: every qubit of Emerald (54) and Garnet (20)
+prepared in |0⟩ or |1⟩ and measured 5× without reset (2 circuits × 4 000 shots per chip).
+Per qubit: first-read errors, flip rates between consecutive reads, and real state changes
+(an A-A-B-B pattern, which one readout error cannot fake; validated in Aer: a pure readout
+error gives 0.3 %, a real decay 4.8 %). Data: `results/hw/meas_*.json`.
+
+* **|1⟩ decays under measurement on every qubit**: 4–8 % per readout, against < 1 % for
+  |0⟩ → |1⟩. An un-reset ancilla is in |1⟩ half the time, so this is a generic cost of the
+  no-reset scheme that single-shot readout calibration does not show.
+* **It predicts in-code ancilla errors**: across all 32 ancillas of the four Emerald regions
+  below, the per-qubit flip rate correlates with the time-like error learned from QEC data
+  with **Pearson r = 0.84**. Resonance's readout calibration reaches only r = 0.37. Emerald
+  QB33 (excluded from our main patch after the test run) is the worst qubit on the chip
+  (31 % decay per readout).
+* Garnet QB11 is *not* anomalous under repeated measurement (flip < 3 %). Its ~25 % in-code
+  error therefore comes from its gates or neighbours, not its readout.
+
+### E2. Spatial variation across Emerald
+`experiments/regions.py` picks the 3 qubit sets with least overlap with our main patch and
+with each other (from 19 SWAP-free sets on today's coupler graph). Same circuits, DD on,
+rounds 1–5, 2 000 shots per point (main patch: 4 000). Data: `results/figures/regions_emerald.json`.
+
+| region | ε_L, BP+OSD | ε_L, correlated MWPM | hottest ancillas (learned) |
+|---|---|---|---|
+| main patch | **2.65 ± 0.07 %** | 2.82 ± 0.07 % | QB19 4.9 %, QB30 3.9 % |
+| region 3 | 3.00 ± 0.11 % | 3.26 ± 0.11 % | QB12 7.5 %, QB19 5.0 % |
+| region 2 | 3.20 ± 0.11 % | 3.49 ± 0.12 % | QB12 6.9 %, QB19 6.9 % |
+| region 1 | 3.87 ± 0.12 % | 4.11 ± 0.13 % | QB33 10.8 %, QB10 8.8 % |
+
+* The same code varies by 46 % in ε_L depending on its placement on the chip.
+* The hottest ancilla of every region is one of the four worst qubits in E1 (QB33, QB10,
+  QB19, QB12).
+* Predicting the region ranking (`results/figures/regions_prediction.json`, 30 000
+  simulated shots per point): the calibration-only model gets the order wrong (Spearman
+  −0.2; it even ranks the main patch worst). Adding E1's flip rates gets it nearly right
+  (Spearman +0.8). Absolute values are overestimated, and with 4 regions this is
+  indicative, not conclusive.
+
+### E3. Dynamical-decoupling strategy and reproducibility
+IQM's server-side DD pass accepts a custom `DDStrategy`. Same calibration, same patch,
+rounds 1–5 × 1 000 shots each (`results/figures/dd_strategy_comparison.json`):
+
+| DD strategy | pulses on centre data qubit (5 rounds) | ε_L, BP+OSD | ε_L, correlated MWPM |
+|---|---|---|---|
+| off (compiled for comparison) | 14 | – | – |
+| standard (one EDD per readout window) | 94 | 2.64 ± 0.14 % | 2.84 ± 0.15 % |
+| dense (up to 3 EDD back to back) | 174 | 2.75 ± 0.14 % | 2.97 ± 0.15 % |
+
+* Denser DD gives no further gain: standard DD already removes the idle dephasing. What
+  remains (|1⟩ decay during readout, E1) is not something DD can remove.
+* The standard-DD run reproduces the headline two hours later (2.64 % vs 2.65 %).
+
+### E4. Pulse level (PulLA)
+`experiments/run_pulla.py` converts our transpiled circuits with `qiskit_to_pulla`,
+compiles them with PulLA's standard compiler (incl. the DD strategies above) and submits
+the playlist. Compilation works on our account, but **submission is refused**
+("Personal account does not have pulse-level access enabled"), so no pulse-level hardware
+data exists. The compiled schedules give Emerald's real timings for our circuit: PRX 24 ns,
+CZ 40 ns, **readout 1.04 µs**, initial relaxation wait 400 µs. The mid-circuit readout is
+~80 % of each syndrome round, which is why readout-time effects (E1) dominate the
+no-reset error budget.
+
 ## Findings
 
 ### 1. Error correction works on Emerald, not on Garnet
@@ -174,7 +239,8 @@ hardware path (transpile → run → m2d → decode) gives ε_L ≈ 8.6 %.
   (3.5 % vs 2.8 %) 2 000 training shots per fold are too few at this error level.
 * The headline picks the best of 11 prior/decoder combinations; the spread on that data
   set is 2.6–3.5 % (Union-Find excluded: 3.2–3.3 %).
-* PulLA pulse-level access is confirmed (calibration stash and compiler load for Emerald
-  and Garnet) but no pulse-level job has been run yet.
+* No pulse-level hardware data: the account can compile with PulLA but not submit pulse jobs (E4).
+* The simulation noise model still uses assumed durations (CZ 80 ns, readout 1.5 µs) rather
+  than the compiled ones (40 ns, 1.04 µs) measured in E4.
 * Garnet calibration does not report readout QND-ness, so the QB11 mechanism is not
   identified.
