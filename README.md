@@ -61,7 +61,8 @@ python -m venv .venv && .venv/Scripts/python -m pip install -r requirements.txt
 * The no-reset circuit is not worse than the reset one in simulation (no reset error, same
   detector semantics) — ε_L ≈ 0.35 %/round at uniform p = 0.3 %.
 
-Results and figures are written to `results/` (see `RESULTS.md` once hardware data exist).
+**Hardware results: see [RESULTS.md](RESULTS.md).** Headline: on IQM Emerald, ε_L = 2.8 % per
+round with correction vs 8.6 % without (Z- and X-memory). Demo outline: `docs/demo_outline.md`.
 
 ## Acknowledgements
 

@@ -1,0 +1,153 @@
+# Results — d = 3 rotated surface-code memory on IQM Emerald and Garnet
+
+All hardware runs: distance-3 rotated surface code (9 data + 8 ancilla qubits), **no
+mid-circuit reset** (detectors `m_r ⊕ m_{r-2}`), circuits in native H/PRX + CZ,
+**0 SWAPs** (layout pinned, routing disabled, every CZ verified to be a coupler).
+All round counts of a sweep were submitted in one batch, so every point of a curve
+shares one calibration. Uncertainties are 1σ binomial (points) and Fisher-information
+(fits). Raw per-shot data for every run is in `results/hw/`.
+
+**Definitions.** *P_L* = fraction of shots whose final, decoded logical value differs
+from the prepared one. *ε_L* = logical error per round, from a binomial-MLE fit of
+`2 P_L = 1 − (1 − 2 ε_L)^n` over n = 1…5 (the README's formula). "No correction" =
+the raw parity of the logical row of data qubits.
+
+## Headline
+
+> **IQM Emerald, DD on: ε_L = 2.82 ± 0.07 % per round (Z-memory) and 2.76 ± 0.07 %
+> (X-memory) with correlated MWPM, versus 8.6 % / 10.6 % without correction — error
+> correction reduces the logical error rate 3–4× in both logical bases.**
+
+The decoder prior here is SI1000 (p = 1 %); every prior/decoder combination we ran gives
+2.8–3.5 % on this data set (table below), so the conclusion does not depend on that choice.
+
+P_L per round count (4 000 shots each):
+
+| rounds n | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| no correction | 0.110 ± 0.005 | 0.169 ± 0.006 | 0.211 ± 0.006 | 0.240 ± 0.007 | 0.296 ± 0.007 |
+| **decoded (correlated MWPM)** | **0.030 ± 0.003** | **0.052 ± 0.004** | **0.081 ± 0.004** | **0.106 ± 0.005** | **0.123 ± 0.005** |
+
+Figure: `results/figures/20261121-151940_emerald_Z_ddon.png` (P_L vs n with fits, and the
+per-stabilizer detector-firing map).
+
+## All hardware runs (Z-memory)
+
+ε_L per round:
+
+| run | qubits | shots/pt | no correction | MWPM, calibrated prior | best decoder |
+|---|---|---|---|---|---|
+| Garnet, DD off | only SWAP-free set | 4 000 | 12.33 ± 0.21 % | 13.63 ± 0.22 % | 11.94 ± 0.21 % (learned) |
+| Garnet, DD on | same | 4 000 | 12.16 ± 0.20 % | 12.55 ± 0.21 % | 11.62 ± 0.19 % (correlated) |
+| Emerald test, DD off | calibration-best patch | 1 000 (n = 1–3) | 6.82 ± 0.36 % | 7.88 ± 0.39 % | 5.98 ± 0.37 % (learned) |
+| Emerald, DD off | **QB33, QB26 excluded** | 4 000 | 9.22 ± 0.16 % | 3.41 ± 0.08 % | 3.18 ± 0.08 % (MWPM) |
+| **Emerald, DD on** | same | 4 000 | 8.59 ± 0.15 % | 3.15 ± 0.08 % | **2.82 ± 0.07 %** (correlated) |
+
+Decoders compared on identical shots: MWPM and correlated MWPM (PyMatching) with
+uniform, SI1000 and per-qubit calibrated priors, and our cross-validated data-learned
+weights (`qec/learn.py`). Full tables: `results/figures/*.json`.
+
+## X-memory (Emerald, DD on, same qubits)
+
+Same 17 qubits as the headline Z run, logical |+⟩ stored, data read out in the X basis.
+
+| rounds n | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| no correction | 0.138 ± 0.005 | 0.199 ± 0.006 | 0.256 ± 0.007 | 0.274 ± 0.007 | 0.336 ± 0.007 |
+| **decoded (correlated MWPM)** | **0.026 ± 0.003** | **0.057 ± 0.004** | **0.077 ± 0.004** | **0.100 ± 0.005** | **0.124 ± 0.005** |
+
+**ε_L = 2.76 ± 0.07 % per round** (correlated MWPM, SI1000 prior) vs 10.64 ± 0.18 % without
+correction, i.e. a 3.9× reduction. This is consistent with Z-memory (2.82 ± 0.07 %), so both
+logical bases are protected equally. The calibrated prior does worse here (4.01 %, MWPM) than
+for Z (3.15 %). Figure: `results/figures/20261121-160049_emerald_X_ddon.png`.
+
+## Findings
+
+### 1. Error correction works on Emerald, not on Garnet
+On Emerald the decoder lowers ε_L from 8.6 % to 2.8 %. On Garnet no decoder beats raw
+readout beyond the first round (ε_L ≈ 12 % either way): Garnet's patch is above
+threshold for this circuit, so the decoder's corrections are about as often wrong as right.
+
+### 2. Calibration underestimates specific ancillas by up to 30×
+Time-like error per stabilizer (ancilla readout + idling), learned from the detection
+events with the p_ij method, against what the calibration-based model expects:
+
+| device | ancilla | learned (DD off) | learned (DD on) | calibration model |
+|---|---|---|---|---|
+| Garnet | Z@QB11 | 26.6 % | 24.8 % | 2.5 % |
+| Garnet | X@QB7 | 21.3 % | 22.2 % | 3.8 % |
+| Garnet | X@QB5 | 20.0 % | 9.8 % | 1.8 % |
+| Garnet | X@QB15 | 12.2 % | 9.3 % | 2.8 % |
+| Emerald (test) | X@QB33 | 14.5 % | – | 1.2 % |
+| Emerald (test) | Z@QB26 | 10.7 % | – | 1.0 % |
+| Emerald | X@QB39 | 18.3 % | 2.7 % | 0.6 % |
+| Emerald | other 7 ancillas | 1.4–4.5 % | 2.0–4.9 % | 0.6–3.0 % |
+
+The method was validated in simulation first: it recovers a planted 25 % ancilla error
+as 25.1 % (`tests/test_pipeline.py::test_learned_weights_recover_hot_ancilla`).
+
+### 3. Placement from measured errors halves the logical error rate
+Emerald has 64 SWAP-free placements of the d = 3 code (16 qubit sets × 4 orientations;
+Garnet has exactly one set). Re-placing the code to exclude the two ancillas measured as
+bad in the test run (QB33, QB26) lowered ε_L, same decoder (MWPM, calibrated prior),
+from 7.9 % to 3.4 % per round, and raised the fraction of syndrome-free shots after
+2 rounds from 7 % to 28 %. (The test run had fewer shots and round counts, and a
+different calibration day-time, so part of the gain may be drift.)
+
+### 4. Dynamical decoupling separates three error mechanisms
+Switching IQM's server-side DD on and off, on identical circuits and qubits:
+
+* **idle dephasing — fixed by DD**: Emerald QB39 18.3 % → 2.7 %; Garnet QB5 20.0 % → 9.8 %.
+* **energy relaxation — not fixed by DD**: Garnet QB7 (T1 = 9.6 µs, T2 = 5.2 µs) 21 % → 22 %.
+* **neither (DD-insensitive, not in calibration)**: Garnet QB11 (calibrated readout 98.8 %,
+  T1 = 51 µs) stays at ~25 %. Candidates: measurement-induced excitation of the un-reset
+  ancilla, leakage, or a TLS defect.
+
+Net effect of DD on ε_L (same decoder, correlated MWPM with SI1000 prior): Emerald
+3.24 → 2.82 %, Garnet 13.07 → 11.62 %; fraction of syndrome-free shots after 2 rounds
+Emerald 28 % → 38 %, Garnet 1.3 % → 3.6 %.
+
+### 5. Simulation baseline vs hardware
+`experiments/compare_sim_hw.py` simulates the exact circuit on the exact qubits of each
+run (`results/figures/sim_vs_hardware.png`; all decoded with MWPM + calibrated prior):
+
+| run | sim: calibration | sim: calibration + measured ancilla errors | hardware |
+|---|---|---|---|
+| Emerald DD off | 3.84 % | 5.33 % | 3.41 % |
+| Emerald DD on | 3.84 % | 5.21 % | 3.15 % |
+| Garnet DD off | 6.85 % | 11.44 % | 13.63 % |
+| Garnet DD on | 6.85 % | 10.88 % | 12.55 % |
+
+* On the Emerald patch the calibration model predicts the hardware to within ~15 %
+  (hardware is slightly *better*). Adding the learned rates over-counts there, because on
+  a good patch they mostly re-measure errors the model already contains.
+* On Garnet the calibration model misses half the error; adding the measured ancilla
+  errors closes ~70 % of the gap and reproduces P_L for n = 2…5 almost exactly
+  (0.284 / 0.351 / 0.393 predicted vs 0.302 / 0.354 / 0.396 measured, n = 3…5).
+  The bad ancillas are the dominant cause.
+* Garnet's n = 1 point (0.143) is 2× above both models (0.064): an additional
+  preparation/readout-boundary error not present in the calibration.
+
+### 6. Comparison with prior work on the same chip
+An earlier solution to this challenge
+([ItsSypher/Quantum-ECC](https://github.com/ItsSypher/Quantum-ECC), Emerald, d = 3,
+1 round) reports P_L = 0.364 (circuit level) and 0.050 (pulse level via PulLA). Ours:
+**P_L = 0.030 ± 0.003 at 1 round, circuit level + DD**. Different calibration dates, so part
+of the difference is the device.
+
+## Simulation (no hardware)
+`experiments/simulate.py`, the no-reset native circuit, 50 000 shots per point,
+n = 1–10: ε_L = 0.35 % (MWPM) / 0.32 % (correlated) at uniform p = 0.3 %; no-reset is not
+worse than reset (0.345 vs 0.353 %). On IQM's 54-qubit fake backend (noisy Aer), the full
+hardware path (transpile → run → m2d → decode) gives ε_L ≈ 8.6 %.
+
+## Limitations
+* d = 5 has no SWAP-free embedding on Emerald (VF2 finds none), so no distance scaling
+  (Λ) is shown; d = 3 alone cannot demonstrate operation below threshold.
+* X-memory was run with DD on only.
+* The data-learned decoder wins only on the noisiest data (Garnet DD off). On Emerald
+  (3.5 % vs 2.8 %) 2 000 training shots per fold are too few at this error level.
+* The headline picks the best of 8 prior/decoder combinations; the spread on that data
+  set is 2.8–3.5 %.
+* Garnet calibration does not report readout QND-ness, so the QB11 mechanism is not
+  identified.
