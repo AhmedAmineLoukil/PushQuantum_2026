@@ -21,6 +21,8 @@ the raw parity of the logical row of data qubits.
 
 The decoder prior here is SI1000 (p = 1 %). Every prior/decoder combination we ran gives
 2.6–3.5 % on this data set (tables below), so the conclusion does not depend on that choice.
+A prior that takes readout from our own characterization (E5) improves this slightly:
+2.62 ± 0.07 % (Z) and **2.46 ± 0.07 %** (X) with BP+OSD.
 
 P_L per round count (4 000 shots each):
 
@@ -172,41 +174,60 @@ Same calibration, same patch, rounds 1–5 × 1 000 shots each, submitted togeth
 
 ### E5. Decoder prior from our own readout characterization
 `experiments/characterized_decoding.py`, data `results/figures/characterized_decoding.json`.
-The E1 measurements were fed back into the decoder weights. The calibrated model's readout
-error (a single state flip before `M`) is replaced, per qubit, by the two effects E1
-separates: a classical misread that corrupts only the recorded bit (Stim `M(p)`), and a real
-state change during readout that persists in the no-reset circuit (`X_ERROR` after `M`)
-(`NoiseModel.with_characterization`). E.g. ancilla QB19: 1.5 % misread, 4.1 % state change.
-Same shots, three priors × three decoders on all 12 hardware runs; ε_L per round (%), BP+OSD:
+The E1 measurements were fed back into the decoder weights. Every model so far treated a
+readout error as a single state flip before `M`. Here it is replaced, per qubit, by the two
+effects E1 separates: a classical misread that corrupts only the recorded bit (Stim `M(p)`),
+and a real state change during readout that persists in the no-reset circuit (`X_ERROR`
+after `M`) (`NoiseModel.with_characterization`). E.g. ancilla QB19: 1.5 % misread, 4.1 %
+state change. Four priors decode the same shots of all 12 hardware runs:
 
-| run | SI1000 | calibrated | characterized |
+* **SI1000**: generic, p = 1 % (readout 5 %).
+* **calibrated**: per-qubit and per-coupler Resonance calibration.
+* **characterized**: calibrated, with readout from E1.
+* **SI1000 + char.**: SI1000 for gates and idling, readout from E1.
+
+ε_L per round (%), BP+OSD:
+
+| run | SI1000 | calibrated | characterized | SI1000 + char. |
+|---|---|---|---|---|
+| Emerald Z, DD off | 3.12 ± 0.08 | 3.25 ± 0.08 | **3.08 ± 0.08** | 3.10 ± 0.08 |
+| Emerald Z, DD on | 2.65 ± 0.07 | 2.88 ± 0.07 | 2.79 ± 0.07 | **2.62 ± 0.07** |
+| Emerald X, DD on | 2.60 ± 0.07 | 3.55 ± 0.08 | 3.47 ± 0.08 | **2.46 ± 0.07** |
+| Emerald region 1 | 3.87 ± 0.12 | 4.20 ± 0.13 | **3.86 ± 0.12** | **3.86 ± 0.12** |
+| Emerald region 2 | 3.20 ± 0.11 | 3.41 ± 0.12 | 3.24 ± 0.11 | **3.03 ± 0.11** |
+| Emerald region 3 | 3.00 ± 0.11 | 3.18 ± 0.11 | 3.18 ± 0.11 | **2.95 ± 0.11** |
+| Emerald, dense DD | **2.75 ± 0.14** | 2.82 ± 0.15 | 2.80 ± 0.15 | 2.79 ± 0.15 |
+| Emerald, circuit ref. | **2.61 ± 0.14** | 2.81 ± 0.15 | 2.74 ± 0.14 | **2.61 ± 0.14** |
+| Emerald, PulLA standard | **2.79 ± 0.15** | 3.03 ± 0.15 | 2.87 ± 0.15 | 2.81 ± 0.15 |
+| Emerald, PulLA dense | 2.56 ± 0.14 | 2.70 ± 0.14 | 2.71 ± 0.14 | **2.54 ± 0.14** |
+| Garnet Z, DD off | 12.26 ± 0.20 | 12.19 ± 0.20 | 11.94 ± 0.20 | **11.81 ± 0.20** |
+| Garnet Z, DD on | 11.44 ± 0.19 | 11.60 ± 0.19 | 11.27 ± 0.19 | **11.01 ± 0.18** |
+
+Mean change vs SI1000 over the 12 runs (pp; negative = better) and runs where it is better:
+
+| prior | MWPM | correlated MWPM | BP+OSD |
 |---|---|---|---|
-| Emerald Z, DD off | 3.12 ± 0.08 | 3.25 ± 0.08 | **3.08 ± 0.08** |
-| Emerald Z, DD on | **2.65 ± 0.07** | 2.88 ± 0.07 | 2.79 ± 0.07 |
-| Emerald X, DD on | **2.60 ± 0.07** | 3.55 ± 0.08 | 3.47 ± 0.08 |
-| Emerald region 1 | 3.87 ± 0.12 | 4.20 ± 0.13 | **3.86 ± 0.12** |
-| Emerald region 2 | **3.20 ± 0.11** | 3.41 ± 0.12 | 3.24 ± 0.11 |
-| Emerald region 3 | **3.00 ± 0.11** | 3.18 ± 0.11 | 3.18 ± 0.11 |
-| Emerald, dense DD | **2.75 ± 0.14** | 2.82 ± 0.15 | 2.80 ± 0.15 |
-| Emerald, circuit ref. | **2.61 ± 0.14** | 2.81 ± 0.15 | 2.74 ± 0.14 |
-| Emerald, PulLA standard | **2.79 ± 0.15** | 3.03 ± 0.15 | 2.87 ± 0.15 |
-| Emerald, PulLA dense | **2.56 ± 0.14** | 2.70 ± 0.14 | 2.71 ± 0.14 |
-| Garnet Z, DD off | 12.26 ± 0.20 | 12.19 ± 0.20 | **11.94 ± 0.20** |
-| Garnet Z, DD on | 11.44 ± 0.19 | 11.60 ± 0.19 | **11.27 ± 0.19** |
+| calibrated | +0.19 (2/12) | +0.29 (0/12) | +0.23 (1/12) |
+| characterized | +0.07 (5/12) | +0.15 (4/12) | +0.09 (4/12) |
+| **SI1000 + char.** | **−0.15 (12/12)** | **−0.16 (11/12)** | **−0.11 (10/12, 1 tie)** |
 
-* **Characterization fixes part of what calibration gets wrong.** Characterized beats
-  calibrated by 0.12–0.14 pp on average, for every decoder (MWPM, correlated MWPM,
-  BP+OSD), and in 10 of 12 runs with BP+OSD. Error bars are per prior; the priors decode the
-  same shots, so the paired differences are less noisy than the bars suggest.
-* **It does not beat the generic SI1000 prior overall** (+0.07 to +0.15 pp on average). It is
-  the best prior in 4/12 runs: both Garnet runs (BP+OSD: −0.32 and −0.17 pp vs SI1000,
-  giving Garnet's best results so far), region 1 and Emerald DD off. The Emerald headline
-  (2.65 %, SI1000 + BP+OSD) is unchanged.
-* The remaining gap sits in the non-readout part of the calibrated model, which this
-  experiment does not touch: on Emerald X the calibrated gate/idle model costs ~0.9 pp, and
-  replacing readout recovers only 0.08 pp of it. The next step would be to characterize
-  those terms (or learn them from the data, as the p_ij weights do) instead of taking them
-  from calibration.
+* **Our readout characterization improves decoding when it replaces the generic readout
+  model.** SI1000 + char. is the best of the four priors in 11/12 runs with MWPM and
+  correlated MWPM and in 9/12 with BP+OSD. Each per-run gain is within the error bars, but
+  the priors decode the same shots, and the gain has the same sign in 12/12 (MWPM) and
+  11/12 (correlated) runs, which is very unlikely by chance (two-sided sign test p ≈ 0.0005 / 0.006).
+* **New best results:** Emerald X 2.46 ± 0.07 % (BP+OSD; previously 2.60 %), Garnet
+  11.01 % (DD on) and 11.81 % (DD off), previously 11.39 % and 12.26 %. Emerald Z
+  (2.62 %) is unchanged within errors (2.65 %).
+* **Fast decoders gain most.** Correlated MWPM with SI1000 + char. reaches 2.69 % / 2.60 %
+  (Z / X) on Emerald, close to BP+OSD with SI1000 (2.65 % / 2.60 %) at ~40× lower cost
+  (~11 vs ~450 µs/shot).
+* **The calibrated gate/idle model is what hurts.** Swapping readout into the calibrated
+  model helps only a little (calibrated → characterized: −0.12 to −0.14 pp), because the
+  calibrated gate and idle terms cost more (up to ~0.9 pp on Emerald X). The
+  characterization is useful; calibration as a decoder prior is not.
+* The next step would be to characterize the gate and idle terms as well (or learn them
+  from data, as the p_ij weights do) instead of taking them from SI1000 or calibration.
 
 ## Findings
 

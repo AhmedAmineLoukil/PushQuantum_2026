@@ -9,6 +9,8 @@ noise model the decoder's matching graph / BP weights are built from):
                 repeated-measurement characterization: a classical misread
                 (M(p)) plus a persisting state change during readout
                 (NoiseModel.with_characterization)
+  si1000+char   SI1000 for gates and idling, the characterization for readout
+                (the gate/idle part of the calibrated model was what hurt)
 
     .venv/Scripts/python experiments/characterized_decoding.py
 """
@@ -44,6 +46,7 @@ RUNS = [
     ("Garnet Z, DD on", "20261121-144025_garnet_Z_ddon.npz"),
 ]
 DECODERS = ["mwpm", "correlated", "bposd"]
+PRIORS = ["si1000", "calibrated", "characterized", "si1000+char"]
 
 
 def priors(run) -> dict[str, NoiseModel]:
@@ -51,13 +54,15 @@ def priors(run) -> dict[str, NoiseModel]:
     cal = json.loads(Path(run["calibration_file"]).read_text())["calibration"]
     m_cal = NoiseModel.from_calibration(cal, names)
     rows = json.loads(CHAR[run["quantum_computer"]].read_text())
-    return {"si1000": NoiseModel.si1000(0.01), "calibrated": m_cal,
-            "characterized": m_cal.with_characterization(rows, names)}
+    m_si = NoiseModel.si1000(0.01)
+    return {"si1000": m_si, "calibrated": m_cal,
+            "characterized": m_cal.with_characterization(rows, names),
+            "si1000+char": m_si.with_characterization(rows, names)}
 
 
 def main():
     table = []
-    print(f"{'run':<26}" + "".join(f"{p + '/' + d:>26}" for p in ("si1000", "calibrated", "characterized") for d in DECODERS))
+    print(f"{'run':<26}" + "".join(f"{p + '/' + d:>26}" for p in PRIORS for d in DECODERS))
     for label, fname in RUNS:
         run = load_run(HW / fname)
         rounds, basis = [int(r) for r in run["rounds"]], run["basis"]
@@ -79,15 +84,15 @@ def main():
         table.append(row)
         print(f"{label:<26}" + "".join(f"{c:>26}" for c in cells), flush=True)
 
-    # Paired comparison: characterized vs the better of the other two priors.
+    # Paired comparison against the generic SI1000 prior (same shots).
     print()
     for dec in DECODERS:
-        d_cal = [100 * (r[f"characterized/{dec}"][0] - r[f"calibrated/{dec}"][0]) for r in table]
-        d_si = [100 * (r[f"characterized/{dec}"][0] - r[f"si1000/{dec}"][0]) for r in table]
-        wins = sum(r[f"characterized/{dec}"][0] < min(r[f"calibrated/{dec}"][0], r[f"si1000/{dec}"][0])
-                   for r in table)
-        print(f"{dec:>10}: characterized - calibrated = {np.mean(d_cal):+.2f} pp (mean), "
-              f"characterized - si1000 = {np.mean(d_si):+.2f} pp; best prior in {wins}/{len(table)} runs")
+        for p in PRIORS[1:]:
+            d = [100 * (r[f"{p}/{dec}"][0] - r[f"si1000/{dec}"][0]) for r in table]
+            wins = sum(r[f"{p}/{dec}"][0] < r[f"si1000/{dec}"][0] for r in table)
+            best = sum(r[f"{p}/{dec}"][0] == min(r[f"{q}/{dec}"][0] for q in PRIORS) for r in table)
+            print(f"{dec:>10} {p:>14} - si1000 = {np.mean(d):+.2f} pp (mean), "
+                  f"better in {wins}/{len(table)}, best prior in {best}/{len(table)}")
     out = ROOT / "results" / "figures" / "characterized_decoding.json"
     out.write_text(json.dumps(table, indent=1))
     print(f"saved {out}")
