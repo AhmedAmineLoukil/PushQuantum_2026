@@ -34,6 +34,8 @@ def main():
     ap.add_argument("--exclude", nargs="*", default=[], help="physical qubits to avoid, e.g. QB25")
     ap.add_argument("--rounds", type=int, default=3, help="rounds used for scoring")
     ap.add_argument("--shots", type=int, default=20_000)
+    ap.add_argument("--top-k", type=int, default=64,
+                    help="how many placements (best by proxy cost) to simulate")
     args = ap.parse_args()
     RESULTS.mkdir(exist_ok=True)
 
@@ -61,7 +63,7 @@ def main():
     exclude = [name_to_idx[n] for n in args.exclude]
     code = RotatedSurfaceCode(3)
     ranked = rank_layouts(code, edges, cal, names, rounds=args.rounds,
-                          shots=args.shots, exclude=exclude)
+                          shots=args.shots, exclude=exclude, top_k=args.top_k)
     print(f"{len(ranked)} SWAP-free placements scored (calibration: {cal_source})")
     for i, s in enumerate(ranked[:5]):
         print(f"  #{i}: predicted P_L({args.rounds} rounds) = {s.predicted_p_l:.4f}  "
