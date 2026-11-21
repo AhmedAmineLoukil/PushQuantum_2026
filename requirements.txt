@@ -16,7 +16,7 @@ jaxlib==0.7.1
 # --- Simulation & decoding ---
 stim==1.16.0
 pymatching==2.4.0
-numpy==2.4.6
+numpy==2.2.6                   # ldpc (BP+OSD, Union-Find) needs numpy<=2.2.6
 
 # --- Plotting / notebooks ---
 matplotlib==3.11.2
@@ -31,3 +31,5 @@ iqm-qubit-selector
 pytest
 scipy          # binomial-MLE fit of eps_L
 networkx       # VF2 zero-SWAP layout search
+ldpc==2.4.1          # Union-Find and BP+OSD decoders
+beliefmatching==0.2.0

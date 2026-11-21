@@ -59,6 +59,10 @@ def decode(
 
     decoder : "mwpm"       - PyMatching minimum-weight perfect matching
               "correlated" - PyMatching with correlated (X/Y-aware) matching
+              "union_find" - weighted Union-Find (peeling) on the matching graph
+              "bposd"      - belief propagation + ordered-statistics decoding on
+                             the full (hyperedge) error model
+              "belief_matching" - BP to reweight the graph, then MWPM
               "none"       - no correction: raw logical flip rate (a baseline
                              that shows how much the decoder actually helps)
     """
@@ -71,6 +75,8 @@ def decode(
 
     if decoder == "none":
         pred = np.zeros_like(obs_flips)
+    elif decoder in ("union_find", "bposd", "belief_matching"):
+        pred = _decode_ldpc(det_events, noisy_circuit, decoder)
     else:
         dem = noisy_circuit.detector_error_model(decompose_errors=True)
         correlated = decoder == "correlated"
@@ -99,3 +105,41 @@ def syndrome_diagnostics(det_events: np.ndarray) -> dict:
         "error_free_shots": float((w == 0).mean()),
         "detector_firing_rate": det_events.mean(axis=0),
     }
+
+
+def _decode_ldpc(det_events: np.ndarray, noisy_circuit: stim.Circuit, decoder: str) -> np.ndarray:
+    """Decoders from the `ldpc` / `beliefmatching` packages (pip install ldpc beliefmatching)."""
+    from beliefmatching import BeliefMatching, detector_error_model_to_check_matrices
+
+    dem = noisy_circuit.detector_error_model(decompose_errors=True)
+    if decoder == "belief_matching":
+        return BeliefMatching.from_detector_error_model(dem, max_bp_iters=20).decode_batch(det_events)
+
+    import ldpc
+
+    mats = detector_error_model_to_check_matrices(dem, allow_undecomposed_hyperedges=True)
+    if decoder == "bposd":
+        H, L, priors = mats.check_matrix, mats.observables_matrix, mats.priors
+        dec = ldpc.BpOsdDecoder(H, error_channel=list(priors), max_iter=30,
+                                bp_method="product_sum", osd_method="osd_cs", osd_order=7)
+        decode_one = dec.decode
+    else:
+        # Union-Find runs on the graphlike decomposition: each edge's
+        # probability is the XOR-combination of the hyperedges that contain it.
+        H, L = mats.edge_check_matrix, mats.edge_observables_matrix
+        h2e = mats.hyperedge_to_edge_matrix.tocsr()
+        q = np.ones(H.shape[1])
+        for e in range(H.shape[1]):
+            for h in h2e.getrow(e).indices:
+                q[e] *= 1 - 2 * mats.priors[h]
+        p_edge = np.clip(0.5 * (1 - q), 1e-9, 0.5 - 1e-9)
+        llrs = np.log((1 - p_edge) / p_edge)
+        dec = ldpc.UnionFindDecoder(H, uf_method="peeling")
+        decode_one = lambda s: dec.decode(s, llrs=llrs)  # noqa: E731
+
+    L = L.tocsr()
+    out = np.zeros((len(det_events), L.shape[0]), dtype=bool)
+    for k, syndrome in enumerate(det_events.astype(np.uint8)):
+        err = decode_one(syndrome)
+        out[k] = (L @ err) % 2
+    return out

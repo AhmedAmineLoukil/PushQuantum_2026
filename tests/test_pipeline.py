@@ -186,3 +186,15 @@ def test_scaffold_entry_points():
     assert sc.get_circuit_info(sc.make_stim_circuit(3, 2, noise=sc.DEFAULT_NOISE))["circuit_distance"] == 3
     clean = sc.make_stim_circuit(3, 1)
     assert sc.print_qubit_map(clean, sc.build_emerald_qubit_map(clean))
+
+
+@pytest.mark.parametrize("decoder", ["union_find", "bposd", "belief_matching"])
+def test_ldpc_decoders(decoder):
+    """Union-Find, BP+OSD and belief-matching all correct errors in simulation,
+    and the BP-based ones are at least as good as plain MWPM."""
+    c = build_memory_circuit(3, 3, "Z", True, NoiseModel.si1000(3e-3))
+    det, obs = c.compile_detector_sampler(seed=11).sample(5_000, separate_observables=True)
+    res = decode(det, obs, c, decoder)
+    assert res.p_logical < 0.5 * decode(det, obs, c, "none").p_logical
+    if decoder != "union_find":
+        assert res.p_logical <= decode(det, obs, c, "mwpm").p_logical + 3 * res.stderr

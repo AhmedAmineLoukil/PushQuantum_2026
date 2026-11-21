@@ -14,12 +14,13 @@ the raw parity of the logical row of data qubits.
 
 ## Headline
 
-> **IQM Emerald, DD on: ε_L = 2.82 ± 0.07 % per round (Z-memory) and 2.76 ± 0.07 %
-> (X-memory) with correlated MWPM, versus 8.6 % / 10.6 % without correction — error
-> correction reduces the logical error rate 3–4× in both logical bases.**
+> **IQM Emerald, DD on: ε_L = 2.65 ± 0.07 % per round (Z-memory) and 2.60 ± 0.07 %
+> (X-memory) with BP+OSD, versus 8.6 % / 10.6 % without correction — error correction
+> reduces the logical error rate 3–4× in both logical bases.** With PyMatching's
+> correlated MWPM: 2.82 % / 2.76 %.
 
-The decoder prior here is SI1000 (p = 1 %); every prior/decoder combination we ran gives
-2.8–3.5 % on this data set (table below), so the conclusion does not depend on that choice.
+The decoder prior here is SI1000 (p = 1 %). Every prior/decoder combination we ran gives
+2.6–3.5 % on this data set (tables below), so the conclusion does not depend on that choice.
 
 P_L per round count (4 000 shots each):
 
@@ -60,6 +61,30 @@ Same 17 qubits as the headline Z run, logical |+⟩ stored, data read out in the
 correction, i.e. a 3.9× reduction. This is consistent with Z-memory (2.82 ± 0.07 %), so both
 logical bases are protected equally. The calibrated prior does worse here (4.01 %, MWPM) than
 for Z (3.15 %). Figure: `results/figures/20261121-160049_emerald_X_ddon.png`.
+
+## Decoder comparison (identical shots, identical priors)
+
+`experiments/decoder_comparison.py`, figure `results/figures/decoder_comparison.png`.
+ε_L per round with the SI1000 (p = 1 %) prior; µs/shot is Python-loop timing for the
+`ldpc` decoders (an upper bound, not their asymptotic speed):
+
+| decoder | Emerald Z, DD on | Emerald Z, DD off | Emerald X, DD on | Garnet Z, DD on | Garnet Z, DD off | µs/shot |
+|---|---|---|---|---|---|---|
+| none | 8.59 ± 0.15 | 9.22 ± 0.16 | 10.64 ± 0.18 | 12.16 ± 0.20 | 12.33 ± 0.21 | – |
+| Union-Find | 3.30 ± 0.08 | 3.49 ± 0.08 | 3.22 ± 0.08 | 14.56 ± 0.24 | 15.71 ± 0.26 | ~50 |
+| MWPM | 3.01 ± 0.08 | 3.40 ± 0.08 | 3.01 ± 0.08 | 12.17 ± 0.20 | 13.38 ± 0.22 | ~9 |
+| correlated MWPM | 2.82 ± 0.07 | 3.24 ± 0.08 | 2.76 ± 0.07 | 11.62 ± 0.19 | 13.07 ± 0.21 | ~11 |
+| belief-matching | 2.77 ± 0.07 | 3.20 ± 0.08 | 2.71 ± 0.07 | **11.39 ± 0.19** | 12.54 ± 0.21 | ~300 |
+| **BP+OSD** | **2.65 ± 0.07** | **3.12 ± 0.08** | **2.60 ± 0.07** | 11.44 ± 0.19 | **12.26 ± 0.20** | ~450 |
+
+* Ranking on Emerald is the same in every run: BP+OSD < belief-matching < correlated
+  MWPM < MWPM < Union-Find. Using the full hyperedge error model (BP+OSD) gains ~12 %
+  over plain MWPM, which matches the ordering in simulation.
+* Union-Find is the fastest decoder asymptotically but costs ~10 % in ε_L. On Garnet
+  (above threshold) it is worse than no correction.
+* A calibration-weighted prior is not better than the generic SI1000 prior on these data
+  (e.g. Emerald X: MWPM 4.01 % calibrated vs 3.01 % SI1000), because calibration
+  under-states the ancilla errors that dominate (see Finding 2).
 
 ## Findings
 
@@ -147,7 +172,9 @@ hardware path (transpile → run → m2d → decode) gives ε_L ≈ 8.6 %.
 * X-memory was run with DD on only.
 * The data-learned decoder wins only on the noisiest data (Garnet DD off). On Emerald
   (3.5 % vs 2.8 %) 2 000 training shots per fold are too few at this error level.
-* The headline picks the best of 8 prior/decoder combinations; the spread on that data
-  set is 2.8–3.5 %.
+* The headline picks the best of 11 prior/decoder combinations; the spread on that data
+  set is 2.6–3.5 % (Union-Find excluded: 3.2–3.3 %).
+* PulLA pulse-level access is confirmed (calibration stash and compiler load for Emerald
+  and Garnet) but no pulse-level job has been run yet.
 * Garnet calibration does not report readout QND-ness, so the QB11 mechanism is not
   identified.
