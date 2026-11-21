@@ -162,3 +162,27 @@ def test_learned_weights_recover_hot_ancilla():
     assert abs(rates[hot_name] - 0.25) < 0.03
     assert max(v for k, v in rates.items() if k != hot_name) < 0.06
     assert res.p_logical < 0.8 * decode(det, obs, c_wrong).p_logical
+
+
+def test_scaffold_entry_points():
+    """The challenge's function names work end to end on simulated shots."""
+    import surface_code as sc
+
+    rounds, pl, shots = [1, 2, 3, 4], [], []
+    for r in rounds:
+        noisy = sc.make_stim_circuit(3, r, "Z", no_reset=True, noise=sc.DEFAULT_NOISE)
+        clean = sc.make_stim_circuit(3, r, "Z", no_reset=True, noise=None)
+        raw = noisy.compile_sampler(seed=r).sample(20_000)
+        syn = sc.extract_syndromes(raw, clean) | {"rounds": r, "basis": "Z"}
+        ler, err = sc.decode_hardware_results(syn, noise=sc.DEFAULT_NOISE)
+        assert 0 < ler < 0.1 and err > 0
+        pl.append(ler)
+        shots.append(20_000)
+    eps, eps_err = sc.fit_logical_error_rate(rounds, pl, shots)
+    assert 5e-4 < eps < 2e-2 and eps_err > 0
+
+    qc = sc.make_qiskit_circuit(3, 2, "X", no_reset=True)
+    assert qc.num_qubits == 17 and qc.num_clbits == 2 * 8 + 9
+    assert sc.get_circuit_info(sc.make_stim_circuit(3, 2, noise=sc.DEFAULT_NOISE))["circuit_distance"] == 3
+    clean = sc.make_stim_circuit(3, 1)
+    assert sc.print_qubit_map(clean, sc.build_emerald_qubit_map(clean))

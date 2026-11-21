@@ -19,6 +19,20 @@ Stim (native H+CZ, no-reset detectors) → Qiskit → zero-SWAP pinned transpile
 | `qec/decode.py`, `qec/analysis.py` | MWPM and correlated MWPM (PyMatching) with the DEM built from the calibrated model; **binomial maximum-likelihood fit** of `P_L(n) = ½(1 − A(1−2ε_L)^n)` with Fisher-information errors, README form (A = 1) and free-A (SPAM-separated) form. | LER statistics |
 | `tests/` | 24 tests: determinism of every detector (proves the no-reset algebra), circuit distance = d, reset/no-reset give identical detection events for the same physical error, Qiskit translation reproduces Stim bit-for-bit under injected errors (Aer), layout nativeness, fit recovers a known ε. | Correctness |
 
+## Challenge entry points
+
+`surface_code.py` exposes the scaffold's names on top of `qec/`:
+`make_stim_circuit(distance, rounds, basis, no_reset, noise)`, `make_qiskit_circuit`,
+`DEFAULT_NOISE`, `build_emerald_qubit_map`, `print_qubit_map`, `run_qiskit`,
+`extract_syndromes`, `decode_hardware_results(syndromes) -> (P_L, err)` and
+`fit_logical_error_rate(rounds, P_L, shots) -> (eps_L, err)`. They are tested end to
+end in `tests/test_pipeline.py::test_scaffold_entry_points`.
+
+Simulation baseline vs hardware: `experiments/compare_sim_hw.py results/hw/<run>.npz ...`
+simulates the exact circuit and qubits of each run under the calibration model (and
+the calibration model plus the ancilla errors learned from that run) and plots them
+against the hardware points (`results/figures/sim_vs_hardware.png`).
+
 ## Quick start
 
 ```bash
