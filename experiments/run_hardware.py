@@ -30,6 +30,8 @@ def main():
     ap.add_argument("--basis", default="Z", choices=["Z", "X"])
     ap.add_argument("--shots", type=int, default=4000)
     ap.add_argument("--dd", default="off", choices=["off", "on", "both"])
+    ap.add_argument("--dd-strategy", default="standard", choices=["standard", "dense"],
+                    help="DD sequence used when DD is on (see qec.hardware.dd_strategy)")
     ap.add_argument("--quantum-computer", default="emerald")
     ap.add_argument("--layout", help="default: results/layout_<quantum-computer>.json")
     ap.add_argument("--confirm", action="store_true", help="actually submit (spends credits)")
@@ -89,12 +91,14 @@ def main():
     dd_settings = {"off": [False], "on": [True], "both": [False, True]}[args.dd]
     jobs, live = [], {}
     for dd in dd_settings:
-        job = backend.run(tqcs, shots=args.shots) if args.fake else submit(backend, tqcs, args.shots, dd=dd)
+        job = backend.run(tqcs, shots=args.shots) if args.fake else submit(backend, tqcs, args.shots, dd=dd,
+                                                                  dd_strategy_name=args.dd_strategy)
         print(f"submitted DD={'on' if dd else 'off'}: job {job.job_id()}", flush=True)
         jobs.append({"dd": dd, "job_id": str(job.job_id())})
         live[str(job.job_id())] = job
 
     pending = dict(stamp=stamp, rounds=args.rounds, basis=args.basis, shots=args.shots,
+                   dd_strategy=args.dd_strategy,
                    quantum_computer=args.quantum_computer, fake=args.fake, jobs=jobs,
                    layout=lay_info["layout"], physical=lay_info["physical"],
                    calibration_file=str(cal_file), depths=[t.depth() for t in tqcs])
@@ -113,8 +117,10 @@ def collect(pending: dict, live_jobs: dict | None, wait: float, pending_path: Pa
                 for r in rounds]
     for entry in pending["jobs"]:
         jid, dd = entry["job_id"], entry["dd"]
+        strat = pending.get("dd_strategy", "standard")
         tag = (f"{pending['stamp']}_{'fake' if pending['fake'] else pending['quantum_computer']}"
-               f"_{pending['basis']}_dd{'on' if dd else 'off'}")
+               f"_{pending['basis']}_dd{'on' if dd else 'off'}"
+               f"{'-' + strat if dd and strat != 'standard' else ''}")
         path = RESULTS / "hw" / f"{tag}.npz"
         if path.exists():
             print(f"already saved: {path}")

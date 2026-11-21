@@ -201,15 +201,37 @@ def swap_report(tqc: QuantumCircuit, edges) -> dict:
 
 
 # --------------------------------------------------------------- execution
-def dd_options(enabled: bool):
+def dd_strategy(kind: str):
+    """DD strategies for IQM's server-side DD pass.
+
+    standard : IQM's default (CPMG / XY4 / one EDD per idle window)
+    dense    : up to 3 back-to-back EDD sequences (24 pulses), centre-aligned,
+               in long idle windows such as the ~1 us mid-circuit readout
+    """
+    from iqm.station_control.interface.models.circuit import DDStrategy
+
+    if kind == "standard":
+        return None
+    if kind == "dense":
+        edd = "XYXYYXYX"
+        return DDStrategy(gate_sequences=[(25, edd * 3, "center"), (17, edd * 2, "center"),
+                                          (9, edd, "center"), (5, "YXYX", "center"),
+                                          (2, "XX", "center")])
+    raise ValueError(kind)
+
+
+def dd_options(enabled: bool, strategy: str = "standard"):
     """CircuitCompilationOptions with IQM's server-side dynamical decoupling."""
     from iqm.iqm_client import CircuitCompilationOptions, DDMode
 
-    return CircuitCompilationOptions(dd_mode=DDMode.ENABLED if enabled else DDMode.DISABLED)
+    return CircuitCompilationOptions(dd_mode=DDMode.ENABLED if enabled else DDMode.DISABLED,
+                                     dd_strategy=dd_strategy(strategy) if enabled else None)
 
 
-def submit(backend, tqcs: list[QuantumCircuit], shots: int, dd: bool = False):
-    return backend.run(tqcs, shots=shots, circuit_compilation_options=dd_options(dd))
+def submit(backend, tqcs: list[QuantumCircuit], shots: int, dd: bool = False,
+           dd_strategy_name: str = "standard"):
+    return backend.run(tqcs, shots=shots,
+                       circuit_compilation_options=dd_options(dd, dd_strategy_name))
 
 
 def memory_to_array(memory: list[str], num_measurements: int) -> np.ndarray:
