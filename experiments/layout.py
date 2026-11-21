@@ -90,8 +90,9 @@ def main():
         "ranking": [{"qubits": sorted(s.physical_qubits(names)),
                      "predicted_p_l": s.predicted_p_l} for s in ranked],
     }
-    (RESULTS / "layout.json").write_text(json.dumps(out, indent=1))
-    print("saved results/layout.json")
+    out_path = RESULTS / f"layout_{args.quantum_computer}.json"
+    out_path.write_text(json.dumps(out, indent=1))
+    print(f"saved {out_path}")
 
 
 if __name__ == "__main__":

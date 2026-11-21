@@ -141,3 +141,24 @@ def test_fit_recovers_known_rate():
     f = fit_ler(rounds, k, [n] * len(rounds), free_amplitude=True)
     assert abs(f.eps - 0.03) < 4 * f.eps_err
     assert abs(f.amp - 0.95) < 4 * f.amp_err + 0.01
+
+
+def test_learned_weights_recover_hot_ancilla():
+    """p_ij learning finds a deliberately bad ancilla and beats a wrong prior."""
+    from qec.learn import cross_validated_decode, summarize_learned
+
+    code = RotatedSurfaceCode(3)
+    true = NoiseModel.si1000(4e-3)
+    hot = code.stabilizers[3].ancilla
+    true.p_meas_q[hot] = 0.25
+    c_true = build_memory_circuit(3, 3, "Z", True, true)
+    c_wrong = build_memory_circuit(3, 3, "Z", True, NoiseModel.uniform(4e-3))
+    det, obs = c_true.compile_detector_sampler(seed=5).sample(20_000, separate_observables=True)
+    res, learned = cross_validated_decode(det, obs, c_wrong)
+    names = {str(q): f"q{q}" for q in range(code.num_qubits)}
+    rates = {r["stabilizer"]: r["timelike_learned"]
+             for r in summarize_learned(c_wrong, learned, code, names)}
+    hot_name = next(k for k in rates if k.endswith(f"q{hot}"))
+    assert abs(rates[hot_name] - 0.25) < 0.03
+    assert max(v for k, v in rates.items() if k != hot_name) < 0.06
+    assert res.p_logical < 0.8 * decode(det, obs, c_wrong).p_logical

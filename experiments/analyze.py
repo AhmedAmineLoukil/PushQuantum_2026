@@ -22,6 +22,7 @@ from qec import NoiseModel, RotatedSurfaceCode, build_memory_circuit  # noqa: E4
 from qec.analysis import eps_from_single, fit_ler, plot_ler  # noqa: E402
 from qec.decode import decode, measurements_to_detections, syndrome_diagnostics  # noqa: E402
 from qec.hardware import load_run  # noqa: E402
+from qec.learn import cross_validated_decode, graph_edges, summarize_learned  # noqa: E402
 
 
 def priors(run: dict, p: float, cal_file: str | None = None) -> dict[str, NoiseModel]:
@@ -41,7 +42,7 @@ def analyze(path: Path, p: float, decoders=("mwpm", "correlated", "none"),
     basis = run["basis"]
     code = RotatedSurfaceCode(3)
     models = priors(run, p, cal_file)
-    rows, diag = [], {}
+    rows, diag, learned_summary = [], {}, {}
     for r in rounds:
         clean = build_memory_circuit(3, r, basis, True, None)
         det, obs = measurements_to_detections(run[f"raw_r{r}"], clean)
@@ -56,6 +57,17 @@ def analyze(path: Path, p: float, decoders=("mwpm", "correlated", "none"),
                                  decoder=dec, errors=res.errors, shots=res.shots,
                                  p_l=res.p_logical, p_l_err=res.stderr,
                                  eps_single=eps_from_single(res.p_logical, r)))
+        # Data-driven weights (structure from the uniform prior, probabilities
+        # learned from the detection events, 2-fold cross-validated).
+        if r >= 2:
+            res, learned = cross_validated_decode(
+                det, obs, build_memory_circuit(3, r, basis, True, models["uniform"]))
+            rows.append(dict(rounds=r, prior="data", decoder="learned", errors=res.errors,
+                             shots=res.shots, p_l=res.p_logical, p_l_err=res.stderr,
+                             eps_single=eps_from_single(res.p_logical, r)))
+            learned_summary[r] = summarize_learned(
+                build_memory_circuit(3, r, basis, True, models["uniform"]),
+                learned, code, run["physical"])
 
     fits = {}
     for key in sorted({(x["prior"], x["decoder"]) for x in rows}):
@@ -77,6 +89,23 @@ def analyze(path: Path, p: float, decoders=("mwpm", "correlated", "none"),
     for (prior, dec), (f1, fa, *_rest) in fits.items():
         print(f" {prior:>10} {dec:>10}   {100*f1.eps:6.2f} +/- {100*f1.eps_err:.2f} %"
               f"      {'' if fa is None else f'{100*fa.eps:6.2f} +/- {100*fa.eps_err:.2f} %  A={fa.amp:.3f}'}")
+
+    if learned_summary:
+        rl = max(learned_summary)
+        cal_prior = {}
+        if "calibrated" in models:
+            # What the calibration-based model *expected* on the same edges.
+            cal_circ = build_memory_circuit(3, rl, basis, True, models["calibrated"])
+            cal_edges = graph_edges(cal_circ)
+            cal_prior = {x["stabilizer"]: x["timelike_learned"] for x in summarize_learned(
+                cal_circ, {"edges": cal_edges, "p": {e.dets: e.p_prior for e in cal_edges}},
+                code, run["physical"])}
+        print(f" time-like error per stabilizer ({rl} rounds; ancilla readout + idling):")
+        print(f"   {'stabilizer':>10}  learned  calibration-model")
+        for x in sorted(learned_summary[rl], key=lambda x: -x["timelike_learned"]):
+            x["timelike_calibrated"] = cal_prior.get(x["stabilizer"])
+            c = f"{100*cal_prior[x['stabilizer']]:5.1f} %" if x["stabilizer"] in cal_prior else "-"
+            print(f"   {x['stabilizer']:>10}  {100*x['timelike_learned']:5.1f} %   {c}")
 
     # ---- figures
     outdir = path.parent.parent / "figures"
@@ -112,6 +141,7 @@ def analyze(path: Path, p: float, decoders=("mwpm", "correlated", "none"),
         "diagnostics": {r: {k: v for k, v in d.items() if k != "detector_firing_rate"}
                         for r, d in diag.items()},
         "points": rows,
+        "learned_timelike": learned_summary,
         "fits": {f"{p}/{d}": {"eps": f1.eps, "eps_err": f1.eps_err,
                                "eps_freeA": fa.eps if fa else None,
                                "eps_freeA_err": fa.eps_err if fa else None,

@@ -31,12 +31,23 @@ def main():
     ap.add_argument("--shots", type=int, default=4000)
     ap.add_argument("--dd", default="off", choices=["off", "on", "both"])
     ap.add_argument("--quantum-computer", default="emerald")
-    ap.add_argument("--layout", default=str(RESULTS / "layout.json"))
+    ap.add_argument("--layout", help="default: results/layout_<quantum-computer>.json")
     ap.add_argument("--confirm", action="store_true", help="actually submit (spends credits)")
     ap.add_argument("--fake", action="store_true", help="run on IQMFakeAphrodite instead")
+    ap.add_argument("--wait", type=float, default=6 * 3600,
+                    help="seconds to wait for results before leaving the job pending")
+    ap.add_argument("--retrieve", help="collect a previously submitted run from its pending_*.json")
     args = ap.parse_args()
 
-    lay_info = json.loads(Path(args.layout).read_text())
+    if args.retrieve:
+        collect(json.loads(Path(args.retrieve).read_text()), None, args.wait)
+        return
+
+    layout_path = Path(args.layout or RESULTS / f"layout_{args.quantum_computer}.json")
+    lay_info = json.loads(layout_path.read_text())
+    if lay_info.get("quantum_computer", args.quantum_computer) != args.quantum_computer and not args.fake:
+        raise SystemExit(f"{layout_path} was made for {lay_info['quantum_computer']}, "
+                         f"not {args.quantum_computer}: run experiments/layout.py first")
     layout = {int(k): v for k, v in lay_info["layout"].items()}
     print("layout:", lay_info["physical"])
 
@@ -48,7 +59,7 @@ def main():
         backend = get_backend(args.quantum_computer)
         edges = coupling_edges(backend)
 
-    circuits, tqcs = [], []
+    tqcs = []
     for r in args.rounds:
         c = build_memory_circuit(3, r, args.basis, True, None)
         tqc = transpile_pinned(stim_to_qiskit(c), backend, layout)
@@ -56,7 +67,6 @@ def main():
         assert rep["swaps"] == 0 and rep["non_native_pairs"] == 0, rep
         print(f"  rounds={r}: {describe(c)['gate_counts']}  -> transpiled depth {rep['depth']}, "
               f"{rep['two_qubit_gates']} CZ, 0 SWAP")
-        circuits.append(c)
         tqcs.append(tqc)
 
     total = len(tqcs) * args.shots * (2 if args.dd == "both" else 1)
@@ -66,32 +76,63 @@ def main():
         print("dry run only - add --confirm to submit")
         return
 
-    dd_settings = {"off": [False], "on": [True], "both": [False, True]}[args.dd]
-    jobs = []
-    for dd in dd_settings:
-        if args.fake:
-            job = backend.run(tqcs, shots=args.shots)
-        else:
-            job = submit(backend, tqcs, args.shots, dd=dd)
-        print(f"submitted DD={'on' if dd else 'off'}: job {job.job_id()}")
-        jobs.append((dd, job))
-
-    cal_file = DATA_DIR / f"calibration_{args.quantum_computer}_latest.json"
+    # Freeze the calibration this run was planned with (the *_latest file moves on).
+    stamp = timestamp()
     if args.fake:
-        # Record the fake backend's own error profile as the run's calibration.
         from qec.hardware import calibration_from_fake
-        cal_file = DATA_DIR / "calibration_fake_aphrodite.json"
-        cal_file.write_text(json.dumps({"fetched_at": "fake", "calibration": calibration_from_fake(backend)}))
-    for dd, job in jobs:
-        arrays = job_to_arrays(job, [c.num_measurements for c in circuits])
-        tag = f"{timestamp()}_{'fake' if args.fake else args.quantum_computer}_{args.basis}_dd{'on' if dd else 'off'}"
+        cal = calibration_from_fake(backend)
+    else:
+        cal = json.loads((DATA_DIR / f"calibration_{args.quantum_computer}_latest.json").read_text())["calibration"]
+    cal_file = DATA_DIR / f"calibration_{'fake' if args.fake else args.quantum_computer}_run{stamp}.json"
+    cal_file.write_text(json.dumps({"fetched_at": stamp, "calibration": cal}))
+
+    dd_settings = {"off": [False], "on": [True], "both": [False, True]}[args.dd]
+    jobs, live = [], {}
+    for dd in dd_settings:
+        job = backend.run(tqcs, shots=args.shots) if args.fake else submit(backend, tqcs, args.shots, dd=dd)
+        print(f"submitted DD={'on' if dd else 'off'}: job {job.job_id()}", flush=True)
+        jobs.append({"dd": dd, "job_id": str(job.job_id())})
+        live[str(job.job_id())] = job
+
+    pending = dict(stamp=stamp, rounds=args.rounds, basis=args.basis, shots=args.shots,
+                   quantum_computer=args.quantum_computer, fake=args.fake, jobs=jobs,
+                   layout=lay_info["layout"], physical=lay_info["physical"],
+                   calibration_file=str(cal_file), depths=[t.depth() for t in tqcs])
+    pending_path = RESULTS / "hw" / f"pending_{stamp}_{args.quantum_computer}_{args.basis}.json"
+    pending_path.parent.mkdir(parents=True, exist_ok=True)
+    pending_path.write_text(json.dumps(pending, indent=1))
+    print(f"job info saved to {pending_path}", flush=True)
+    collect(pending, live, args.wait, pending_path)
+
+
+def collect(pending: dict, live_jobs: dict | None, wait: float, pending_path: Path | None = None):
+    """Wait for (or re-attach to) the jobs of a run and save their raw shots."""
+    backend = None
+    rounds = pending["rounds"]
+    num_meas = [build_memory_circuit(3, r, pending["basis"], True, None).num_measurements
+                for r in rounds]
+    for entry in pending["jobs"]:
+        jid, dd = entry["job_id"], entry["dd"]
+        tag = (f"{pending['stamp']}_{'fake' if pending['fake'] else pending['quantum_computer']}"
+               f"_{pending['basis']}_dd{'on' if dd else 'off'}")
         path = RESULTS / "hw" / f"{tag}.npz"
-        save_run(path, rounds=args.rounds, basis=args.basis, shots=args.shots, dd=dd,
-                 job_id=str(job.job_id()), quantum_computer=args.quantum_computer,
-                 fake=args.fake, layout=lay_info["layout"], physical=lay_info["physical"],
-                 calibration_file=str(cal_file) if cal_file.exists() else None,
-                 depths=[t.depth() for t in tqcs],
-                 **{f"raw_r{r}": a for r, a in zip(args.rounds, arrays)})
+        if path.exists():
+            print(f"already saved: {path}")
+            continue
+        job = (live_jobs or {}).get(jid)
+        if job is None:
+            backend = backend or get_backend(pending["quantum_computer"])
+            job = backend.retrieve_job(jid)
+        try:
+            arrays = job_to_arrays(job, num_meas, timeout=wait)
+        except Exception as exc:
+            print(f"job {jid} not finished ({type(exc).__name__}: {exc}). "
+                  f"collect later with: experiments/run_hardware.py --retrieve "
+                  f"{pending_path or '<pending json>'}")
+            continue
+        save_run(path, dd=dd, job_id=jid,
+                 **{k: v for k, v in pending.items() if k not in ("jobs", "stamp")},
+                 **{f"raw_r{r}": a for r, a in zip(rounds, arrays)})
         print(f"saved {path}")
 
 

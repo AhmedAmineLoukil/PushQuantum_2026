@@ -52,7 +52,7 @@ def main():
 
     models = {"uniform": NoiseModel.uniform(args.p), "si1000": NoiseModel.si1000(args.p)}
     cal = load_calibration()
-    layout_file = RESULTS / "layout.json"
+    layout_file = RESULTS / "layout_emerald.json"
     if cal is not None and layout_file.exists():
         lay = {int(k): v for k, v in json.loads(layout_file.read_text())["layout"].items()}
         names = qubit_names()

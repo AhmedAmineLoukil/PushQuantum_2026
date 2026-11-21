@@ -232,8 +232,9 @@ def counts_to_array(counts: dict[str, int], num_measurements: int) -> np.ndarray
     return np.concatenate(rows, axis=0)
 
 
-def job_to_arrays(job, circuits_num_meas: list[int]) -> list[np.ndarray]:
-    result = job.result()
+def job_to_arrays(job, circuits_num_meas: list[int], timeout: float | None = None
+                  ) -> list[np.ndarray]:
+    result = job.result(timeout=timeout) if timeout is not None else job.result()
     out = []
     for i, nm in enumerate(circuits_num_meas):
         try:
