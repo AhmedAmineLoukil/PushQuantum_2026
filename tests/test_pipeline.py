@@ -283,6 +283,31 @@ def test_pauli_twirl_is_exact(basis):
     assert np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1])
 
 
+def test_soft_information_decoding():
+    """Synthetic IQ readout: the per-shot misread probabilities are calibrated,
+    every record maps to one graph edge, and soft decoding beats the same graph
+    with average (hard-decision) weights on identical shots."""
+    from qec.soft import SoftMatcher, fit_iq_model, record_effects, without_misreads
+    rng = np.random.default_rng(0)
+    base = NoiseModel.si1000(0.004)
+    base.p_meas = 0.0
+    clean = build_memory_circuit(3, 3, "Z", True, None)
+    assert len(record_effects(clean)) == clean.num_measurements
+    m = build_memory_circuit(3, 3, "Z", True, base).compile_sampler(seed=3).sample(8000)
+    sig = 0.24
+    noise = lambda shape: rng.normal(0, sig, shape) + 1j * rng.normal(0, sig, shape)  # noqa: E731
+    iq = m + noise(m.shape)
+    bits = iq.real > 0.5
+    model = fit_iq_model(noise((3000, m.shape[1])), 1 + noise((3000, m.shape[1])))
+    p = model.misread_probability(iq, bits)
+    assert abs(p.mean() - (bits != m).mean()) < 0.003
+    det, obs = measurements_to_detections(bits, clean)
+    sm = SoftMatcher(build_memory_circuit(3, 3, "Z", True, without_misreads(base)), clean)
+    hard = (sm.decode(det, p.mean(axis=0)) != obs).any(1).mean()
+    soft = (sm.decode(det, p) != obs).any(1).mean()
+    assert soft < 0.85 * hard
+
+
 def test_calibrated_final_readout_prior():
     """Per-qubit calibrated readout errors replace the generic readout only on
     the given (data) qubits, as a classical misread, and lower decoding error

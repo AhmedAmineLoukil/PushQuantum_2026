@@ -1,52 +1,232 @@
 [
  {
-  "theta": 0.2,
+  "theta": 0.15,
   "phi": 0.0,
   "basis": "Z",
   "rows": [
    {
     "rounds": 1,
     "plain": {
-     "errors": 1,
-     "shots": 200,
-     "detection_rate": 0.075625
+     "errors": 2,
+     "shots": 4000,
+     "detection_rate": 0.0380625
     },
     "twirled": {
-     "errors": 2,
-     "shots": 200,
-     "detection_rate": 0.05125
+     "errors": 6,
+     "shots": 4000,
+     "detection_rate": 0.0279375
     }
    },
    {
     "rounds": 2,
     "plain": {
-     "errors": 2,
-     "shots": 200,
-     "detection_rate": 0.0828125
+     "errors": 25,
+     "shots": 4000,
+     "detection_rate": 0.050515625
     },
     "twirled": {
-     "errors": 2,
-     "shots": 200,
-     "detection_rate": 0.0684375
+     "errors": 15,
+     "shots": 4000,
+     "detection_rate": 0.034234375
+    }
+   },
+   {
+    "rounds": 3,
+    "plain": {
+     "errors": 40,
+     "shots": 4000,
+     "detection_rate": 0.05435416666666667
+    },
+    "twirled": {
+     "errors": 20,
+     "shots": 4000,
+     "detection_rate": 0.035333333333333335
+    }
+   },
+   {
+    "rounds": 4,
+    "plain": {
+     "errors": 58,
+     "shots": 4000,
+     "detection_rate": 0.0561796875
+    },
+    "twirled": {
+     "errors": 81,
+     "shots": 4000,
+     "detection_rate": 0.0399140625
     }
    }
   ],
   "fits": {
    "plain": {
-    "eps": 0.005016778449366532,
+    "eps": 0.003144692610222964,
     "ci68": [
-     0.0026498430181628326,
-     0.008490702725643416
+     0.0028713451606647658,
+     0.0034349190386747273
     ],
-    "p_gof": 0.9967115873723335
+    "p_gof": 0.0015925768698784681
    },
    "twirled": {
-    "eps": 0.00669666359319492,
+    "eps": 0.003068725373246503,
     "ci68": [
-     0.0038833082880305562,
-     0.010618178510378109
+     0.002798832731869411,
+     0.003355491196086039
     ],
-    "p_gof": 0.49454499348895786
+    "p_gof": 9.534419162552478e-08
+   }
+  }
+ },
+ {
+  "theta": 0.3,
+  "phi": 0.0,
+  "basis": "Z",
+  "rows": [
+   {
+    "rounds": 1,
+    "plain": {
+     "errors": 82,
+     "shots": 4000,
+     "detection_rate": 0.13665625
+    },
+    "twirled": {
+     "errors": 70,
+     "shots": 4000,
+     "detection_rate": 0.101
+    }
+   },
+   {
+    "rounds": 2,
+    "plain": {
+     "errors": 243,
+     "shots": 4000,
+     "detection_rate": 0.1671875
+    },
+    "twirled": {
+     "errors": 185,
+     "shots": 4000,
+     "detection_rate": 0.13696875
+    }
+   },
+   {
+    "rounds": 3,
+    "plain": {
+     "errors": 434,
+     "shots": 4000,
+     "detection_rate": 0.17785416666666667
+    },
+    "twirled": {
+     "errors": 361,
+     "shots": 4000,
+     "detection_rate": 0.14892708333333332
+    }
+   },
+   {
+    "rounds": 4,
+    "plain": {
+     "errors": 597,
+     "shots": 4000,
+     "detection_rate": 0.183578125
+    },
+    "twirled": {
+     "errors": 557,
+     "shots": 4000,
+     "detection_rate": 0.1554609375
+    }
+   }
+  ],
+  "fits": {
+   "plain": {
+    "eps": 0.03642992176770075,
+    "ci68": [
+     0.03542766669740894,
+     0.03745191823466924
+    ],
+    "p_gof": 1.2005513610278091e-11
+   },
+   "twirled": {
+    "eps": 0.03118530616102204,
+    "ci68": [
+     0.030267040857481307,
+     0.03212276790878378
+    ],
+    "p_gof": 4.973664853703488e-15
+   }
+  }
+ },
+ {
+  "theta": 0.45,
+  "phi": 0.0,
+  "basis": "Z",
+  "rows": [
+   {
+    "rounds": 1,
+    "plain": {
+     "errors": 322,
+     "shots": 4000,
+     "detection_rate": 0.25278125
+    },
+    "twirled": {
+     "errors": 282,
+     "shots": 4000,
+     "detection_rate": 0.19746875
+    }
+   },
+   {
+    "rounds": 2,
+    "plain": {
+     "errors": 766,
+     "shots": 4000,
+     "detection_rate": 0.294640625
+    },
+    "twirled": {
+     "errors": 684,
+     "shots": 4000,
+     "detection_rate": 0.250203125
+    }
+   },
+   {
+    "rounds": 3,
+    "plain": {
+     "errors": 1115,
+     "shots": 4000,
+     "detection_rate": 0.30652083333333335
+    },
+    "twirled": {
+     "errors": 1067,
+     "shots": 4000,
+     "detection_rate": 0.27034375
+    }
+   },
+   {
+    "rounds": 4,
+    "plain": {
+     "errors": 1394,
+     "shots": 4000,
+     "detection_rate": 0.3121640625
+    },
+    "twirled": {
+     "errors": 1445,
+     "shots": 4000,
+     "detection_rate": 0.279390625
+    }
+   }
+  ],
+  "fits": {
+   "plain": {
+    "eps": 0.11169928468118681,
+    "ci68": [
+     0.1096593903030839,
+     0.11377113561917322
+    ],
+    "p_gof": 6.938424293500371e-14
+   },
+   "twirled": {
+    "eps": 0.10668284397965909,
+    "ci68": [
+     0.10471823544637616,
+     0.10867789385318186
+    ],
+    "p_gof": 7.896000552605484e-27
    }
   }
  }

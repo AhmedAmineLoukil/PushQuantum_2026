@@ -1,0 +1,1 @@
+{"job_id": "01a200b5-5577-7627-8e5a-eaeb0119dcd8", "rounds": [1, 2, 3, 4, 6, 8], "dd": "standard", "shots": 2000, "final_readout": "fidelity", "acquisition": "threshold"}

@@ -1,78 +1,70 @@
-# QEC-Emerald — rotated surface-code memory on IQM Emerald
+# QEC-Emerald — surface-code memory on IQM Emerald
 
-Our solution to the IQM *Surface Code on IQM Emerald* challenge (Qiskit track).
+Distance-3 rotated surface code (17 qubits) run as a memory experiment on IQM Emerald,
+decoded offline, with the logical error per round fitted from raw shots.
 
 ```
-Stim (native H+CZ, no-reset detectors) → Qiskit → zero-SWAP pinned transpile → IQM Emerald
-      → raw shots → detection events (m2d) → MWPM / correlated MWPM → P_L(n) → binomial-MLE fit → ε_L
+Stim circuit (native H/PRX + CZ, no resets) → Qiskit, qubits pinned, 0 SWAPs → Emerald (+ DD)
+  → raw shots → no-reset detectors → BP+OSD / MWPM → P_L(n) → fit ε_L
 ```
 
-## What is ours and why it matters
+## Results (Emerald, calibration set `ecec1d0a…`)
 
-| Piece | What we did | Judging criterion |
-|---|---|---|
-| `qec/code.py` | Own rotated-surface-code geometry, stabilizers, logicals and CX schedule (hook errors oriented so the **circuit distance equals d**, checked by Stim). | Correctness |
-| `qec/circuit.py` | Own circuit generator written **directly in Emerald's native gate set (H/PRX + CZ)**. A Hadamard-frame tracker cancels redundant Hadamards, so the simulated/decoded circuit is the one the chip runs. **Proper multi-round no-reset detectors** (`m_r ⊕ m_{r-2}`, final `data ⊕ m_R ⊕ m_{R-1}`), Z and X memory. | Correctness, sophistication |
-| `qec/noise.py` | Per-qubit / per-coupler noise model built from **live Resonance calibration** (1Q, CZ, readout fidelities → Pauli channels; T1/T2 → idle channels during gates and the long measurement windows). Also uniform and SI1000 baselines. | Noise-model improvements |
-| `qec/layout.py` | **VF2 search over every SWAP-free embedding** of the code into the coupler graph, each scored by a Stim simulation under its own calibrated noise model (role-aware: which qubit is data / X / Z ancilla). | Low SWAPs, sophistication |
-| `qec/hardware.py` | Transpile with the layout pinned and `routing_method="none"` — the transpiler *cannot* insert a SWAP, and `swap_report` independently verifies every CZ sits on a physical coupler. One batched job per sweep (all round counts share one calibration), optional **IQM server-side dynamical decoupling**, raw per-shot data saved. | Low SWAPs, advanced features |
-| `qec/decode.py`, `qec/analysis.py` | MWPM and correlated MWPM (PyMatching) with the DEM built from the calibrated model; **binomial maximum-likelihood fit** of `P_L(n) = ½(1 − A(1−2ε_L)^n)` with Fisher-information errors, README form (A = 1) and free-A (SPAM-separated) form. | LER statistics |
-| `qec/physical.py` | **Physical-qubit baseline** on the same 9 data qubits: stores \|0⟩,\|1⟩,\|+⟩,\|−⟩ through the same per-round gate time and the same mid-circuit ancilla readouts, without encoding — the fair "no QEC" reference. | LER statistics |
-| `experiments/reproduce_all.py` | Regenerates every headline number from raw shots: independent numpy re-derivation of the no-reset detectors, Clopper-Pearson intervals, profile-likelihood intervals, G² goodness of fit (rejected fits are flagged), **held-out decoder/prior selection**. Output: `results/reproduced/summary.{md,json}`. | LER statistics |
-| `tests/` | 36 tests: determinism of every detector (proves the no-reset algebra), circuit distance = d, reset/no-reset give identical detection events for the same physical error, Qiskit translation reproduces Stim bit-for-bit under injected errors (Aer), independent detector re-derivation, layout nativeness, fit recovers a known ε with correct profile intervals and rejects a wrong model, physical-baseline circuits, portable calibration paths. | Correctness |
+| | ε_L per round |
+|---|---|
+| Logical Z-memory, DD on (BP+OSD) | **2.61 %** [2.56, 2.67] |
+| Logical X-memory, DD on (BP+OSD) | **2.65 %** [2.59, 2.70] |
+| Bare physical qubit, same qubits and timing, DD on | 1.63 % [1.60, 1.65] |
 
-## Challenge entry points
+No break-even yet: the logical qubit loses 1.6× more per round than one physical qubit.
+Every number is regenerated from raw shots by `experiments/reproduce_all.py` →
+[`results/reproduced/summary.md`](results/reproduced/summary.md). Details: [RESULTS.md](RESULTS.md).
 
-`surface_code.py` exposes the scaffold's names on top of `qec/`:
-`make_stim_circuit(distance, rounds, basis, no_reset, noise)`, `make_qiskit_circuit`,
-`DEFAULT_NOISE`, `build_emerald_qubit_map`, `print_qubit_map`, `run_qiskit`,
-`extract_syndromes`, `decode_hardware_results(syndromes) -> (P_L, err)` and
-`fit_logical_error_rate(rounds, P_L, shots) -> (eps_L, err)`. They are tested end to
-end in `tests/test_pipeline.py::test_scaffold_entry_points`.
+## What is in here
 
-Simulation baseline vs hardware: `experiments/compare_sim_hw.py results/hw/<run>.npz ...`
-simulates the exact circuit and qubits of each run under the calibration model (and
-the calibration model plus the ancilla errors learned from that run) and plots them
-against the hardware points (`results/figures/sim_vs_hardware.png`).
+| Feature | Where |
+|---|---|
+| Surface code in Emerald's native gates; no-reset detectors (`m_r ⊕ m_{r-2}`), Z and X memory | `qec/code.py`, `qec/circuit.py` |
+| Zero-SWAP placement (VF2 + calibration score); every CZ checked against a coupler | `qec/layout.py`, `experiments/layout.py` |
+| Hardware runs: one batch per sweep, server-side DD, interleaved repeats, exact payloads saved | `experiments/run_hardware.py` |
+| Decoders: MWPM, correlated MWPM, Union-Find, belief-matching, BP+OSD | `qec/decode.py` |
+| Decoder priors: SI1000, calibration, measured readout, calibrated per-qubit readout | `qec/noise.py` |
+| Fit: binomial MLE, profile-likelihood CI, goodness of fit, held-out decoder choice | `qec/analysis.py` |
+| Physical-qubit baseline (fair "no QEC" reference) | `qec/physical.py`, `experiments/run_physical_baseline.py` |
+| Pauli twirling of CZ layers (helps against coherent errors in simulation; **hurts on Emerald**) | `qec/circuit.py` (`twirl_seed`) |
+| Pulse level (PulLA) runner — needs an organisation token | `experiments/run_pulla.py` |
 
-## Quick start
+## What we learned on hardware
+
+* **DD matters most**: X-memory 5.8 % → 2.6 % per round.
+* BP+OSD beats correlated MWPM by ~0.2 pp; a measured-readout prior adds ~0.1 pp.
+* Picking qubits from calibration alone is worse than avoiding qubits measured bad.
+* Twirling: 2.69 % → 2.95 % (worse); Emerald's CZ errors are not mainly coherent.
+* High-fidelity (shelved) readout cannot be used via circuit jobs — results are not returned
+  ([details](results/hw/invalid/README.md)). At **pulse level** it works: 2.88 % vs 2.92 % with
+  QND final readout (same session, within error).
+* **Soft information (pulse level, IQ readout)**: on identical shots, per-shot readout confidence
+  fixes 127 failures and causes 69 (sign test p = 4·10⁻⁵): ε_L 3.31 % → 3.23 % (MWPM).
+  Small because Emerald's readout clouds are 5–9 σ apart. `qec/soft.py`, `experiments/soft_decoding.py`.
+
+## Run it
 
 ```bash
-python -m venv .venv && .venv/Scripts/python -m pip install -r requirements.txt
-.venv/Scripts/python -m pytest -q                       # 36 tests, ~20 s, no token
+python -m venv .venv && .venv/Scripts/python -m pip install -r requirements.txt   # iqm-client 37
+.venv/Scripts/python -m pytest -q                         # 40 tests, no token
+.venv/Scripts/python experiments/reproduce_all.py         # all numbers from raw shots, no token
 
-# free, no token
-.venv/Scripts/python experiments/reproduce_all.py       # every headline number from raw shots (~10 min)
-.venv/Scripts/python experiments/simulate.py            # simulation baseline + figure
-.venv/Scripts/python experiments/layout.py --offline    # SWAP-free placement (snapshot + fake backend)
-.venv/Scripts/python experiments/run_hardware.py --fake --rounds 1 2 3 4 5 --shots 2000
-.venv/Scripts/python experiments/analyze.py results/hw/<file>.npz
-
-# real hardware: put IQM_TOKEN=... in .env (see .env.example)
-.venv/Scripts/python experiments/verify_circuits.py     # read-only: rebuild + check every executed circuit
-.venv/Scripts/python experiments/layout.py --out my_layout.json   # live calibration → ranked patches
-.venv/Scripts/python experiments/run_hardware.py --rounds 1 2 3 4 5 6 --shots 4000           # dry run
-# --confirm SUBMITS REAL JOBS (spends credits):
-.venv/Scripts/python experiments/run_hardware.py --basis Z X --dd both --repeats 2 --shots 2000 --confirm
-.venv/Scripts/python experiments/run_physical_baseline.py --dd both --confirm
-.venv/Scripts/python experiments/analyze.py results/hw/*.npz
+# hardware: put IQM_TOKEN=... in .env.  Without --confirm these are dry runs.
+.venv/Scripts/python experiments/run_hardware.py --basis Z X --dd on --rounds 1 2 3 4 6 8 --shots 2000 --confirm
+.venv/Scripts/python experiments/run_physical_baseline.py --dd on --confirm
 ```
 
-## Key facts established so far
+⚠️ `--confirm` submits real jobs and spends credits. Resonance accepts at most 100 circuits per job.
 
-* **d = 3 fits Emerald with zero SWAPs** in 64 placements (16 qubit sets × 4 orientations);
-  every stabilizer CZ is a native coupler. Transpiled depth: 11 (1 round), 29 (3 rounds).
-* **d = 5 has no SWAP-free embedding** on Emerald's 54-qubit coupler graph (VF2 finds none):
-  it would need routing, so we keep d = 3 on hardware and study d = 5 in simulation.
-* The no-reset circuit is not worse than the reset one in simulation (no reset error, same
-  detector semantics) — ε_L ≈ 0.35 %/round at uniform p = 0.3 %.
+## Open items for the merge
 
-**Hardware results: see [RESULTS.md](RESULTS.md).** Headline: on IQM Emerald, ε_L = 2.8 % per
-round with correction vs 8.6 % without (Z- and X-memory). Demo outline: `docs/demo_outline.md`.
+* Pulse-level access (organisation token) → readout-gate overlap, shelved final readout, soft information.
+* Distance 5 has no SWAP-free placement on Emerald, so no Λ (distance-scaling) result.
+* Bring in the other implementation's pieces we keep; run `pytest` and `reproduce_all.py` before merging.
 
-## Acknowledgements
-
-IQM's challenge scaffold (`PushQuantumQEC`) defined the interfaces. We read
-[ItsSypher/Quantum-ECC](https://github.com/ItsSypher/Quantum-ECC) (an earlier
-solution to this challenge) for orientation; none of its code is used here. The Emerald
-coupler snapshot in `data/` is used only offline; live runs re-fetch topology and calibration.
+Acknowledgement: IQM's challenge scaffold (`PushQuantumQEC`) defined the interfaces.
