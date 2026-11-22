@@ -51,7 +51,7 @@ Every number is regenerated from raw shots by `experiments/reproduce_all.py` →
 
 ```bash
 python -m venv .venv && .venv/Scripts/python -m pip install -r requirements.txt   # iqm-client 37
-.venv/Scripts/python -m pytest -q                         # 40 tests, no token
+.venv/Scripts/python -m pytest -q                         # 41 tests, no token
 .venv/Scripts/python experiments/reproduce_all.py         # all numbers from raw shots, no token
 
 # hardware: put IQM_TOKEN=... in .env.  Without --confirm these are dry runs.
