@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from qec import NoiseModel, build_memory_circuit  # noqa: E402
 from qec.analysis import fit_ler  # noqa: E402
 from qec.decode import decode, measurements_to_detections  # noqa: E402
-from qec.hardware import load_run  # noqa: E402
+from qec.hardware import load_run, run_calibration  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 HW = ROOT / "results" / "hw"
@@ -51,7 +51,7 @@ PRIORS = ["si1000", "calibrated", "characterized", "si1000+char"]
 
 def priors(run) -> dict[str, NoiseModel]:
     names = {int(k): v for k, v in run["physical"].items()}
-    cal = json.loads(Path(run["calibration_file"]).read_text())["calibration"]
+    cal = run_calibration(run, required=True)
     m_cal = NoiseModel.from_calibration(cal, names)
     rows = json.loads(CHAR[run["quantum_computer"]].read_text())
     m_si = NoiseModel.si1000(0.01)

@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from qec import NoiseModel, build_memory_circuit  # noqa: E402
 from qec.analysis import fit_ler  # noqa: E402
 from qec.decode import decode, measurements_to_detections  # noqa: E402
-from qec.hardware import load_run  # noqa: E402
+from qec.hardware import load_run, run_calibration  # noqa: E402
 
 DECODERS = ["none", "union_find", "mwpm", "correlated", "belief_matching", "bposd"]
 FIG = Path(__file__).resolve().parent.parent / "results" / "figures"
@@ -40,9 +40,10 @@ def main():
         run = load_run(Path(path))
         rounds, basis = [int(x) for x in run["rounds"]], run["basis"]
         priors = {"si1000": NoiseModel.si1000(args.p)}
-        cal_file = run.get("calibration_file")
-        if cal_file and Path(cal_file).exists():
-            cal = json.loads(Path(cal_file).read_text())["calibration"]
+        cal = run_calibration(run)
+        if cal is None:
+            print(f"  warning: calibration not found for {path}; skipping calibrated prior")
+        else:
             priors["calibrated"] = NoiseModel.from_calibration(
                 cal, {int(k): v for k, v in run["physical"].items()})
         data = {}

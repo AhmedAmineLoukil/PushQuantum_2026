@@ -21,17 +21,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from qec import NoiseModel, RotatedSurfaceCode, build_memory_circuit  # noqa: E402
 from qec.analysis import eps_from_single, fit_ler, plot_ler  # noqa: E402
 from qec.decode import decode, measurements_to_detections, syndrome_diagnostics  # noqa: E402
-from qec.hardware import load_run  # noqa: E402
+from qec.hardware import load_run, run_calibration  # noqa: E402
 from qec.learn import cross_validated_decode, graph_edges, summarize_learned  # noqa: E402
 
 
 def priors(run: dict, p: float, cal_file: str | None = None) -> dict[str, NoiseModel]:
     out = {"uniform": NoiseModel.uniform(p), "si1000": NoiseModel.si1000(p)}
-    cal_file = cal_file or run.get("calibration_file")
-    if cal_file and Path(cal_file).exists():
-        cal = json.loads(Path(cal_file).read_text())["calibration"]
+    cal = run_calibration({"calibration_file": cal_file or run.get("calibration_file")})
+    if cal is not None:
         phys = {int(k): v for k, v in run["physical"].items()}
         out["calibrated"] = NoiseModel.from_calibration(cal, phys)
+    else:
+        print(f"  warning: calibration file not found ({run.get('calibration_file')}); "
+              "skipping the calibrated prior")
     return out
 
 

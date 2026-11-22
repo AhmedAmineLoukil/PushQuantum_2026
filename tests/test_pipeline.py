@@ -188,6 +188,139 @@ def test_scaffold_entry_points():
     assert sc.print_qubit_map(clean, sc.build_emerald_qubit_map(clean))
 
 
+def test_calibration_file_resolves_across_machines():
+    """Runs saved on another machine store an absolute foreign path; it must
+    resolve to the copy in data/ (and a missing file must give None)."""
+    from qec.hardware import resolve_calibration_file, run_calibration
+    foreign = r"C:\Users\someone\QEC-Emerald\data\calibration_emerald_run20261121-151940.json"
+    p = resolve_calibration_file(foreign)
+    assert p is not None and p.name == "calibration_emerald_run20261121-151940.json"
+    assert run_calibration({"calibration_file": foreign})["readout"]
+    assert resolve_calibration_file(r"C:\nowhere\calibration_does_not_exist.json") is None
+    with pytest.raises(FileNotFoundError):
+        run_calibration({"calibration_file": "nope.json"}, required=True)
+
+
+def test_fit_goodness_and_profile_interval():
+    rng = np.random.default_rng(1)
+    rounds = np.arange(1, 9)
+    n = 4000
+    k = rng.binomial(n, p_logical_model(rounds, 0.03))
+    f = fit_ler(rounds, k, [n] * len(rounds))
+    assert f.ci68[0] < f.eps < f.ci68[1] and f.ci95[0] < f.ci68[0] and f.ci68[1] < f.ci95[1]
+    assert abs((f.ci68[1] - f.ci68[0]) / 2 - f.eps_err) < 0.2 * f.eps_err   # ~Gaussian here
+    assert f.model_ok and f.p_gof > 0.01
+    # A curve with a large first-round offset is not exponential with A = 1.
+    k_bad = rng.binomial(n, np.r_[0.15, p_logical_model(rounds[1:], 0.03)])
+    assert not fit_ler(rounds, k_bad, [n] * len(rounds)).model_ok
+
+
+def test_independent_detectors_match_stim():
+    """The numpy re-derivation used by reproduce_all.py agrees with Stim's
+    DETECTOR definitions on noisy samples (both bases)."""
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "reproduce_all", Path(__file__).resolve().parent.parent / "experiments" / "reproduce_all.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    for basis in "ZX":
+        for r in (1, 2, 5):
+            noisy = build_memory_circuit(3, r, basis, True, NoiseModel.si1000(0.01))
+            clean = build_memory_circuit(3, r, basis, True, None)
+            raw = noisy.compile_sampler(seed=r).sample(2000)
+            det, obs = measurements_to_detections(raw, clean)
+            d2, o2 = mod.numpy_detectors(raw, r, basis)
+            assert np.array_equal(det, d2) and np.array_equal(obs[:, 0], o2)
+
+
+@pytest.mark.parametrize("state", ["0", "1", "+", "-"])
+def test_physical_baseline_circuit(state):
+    """Noiseless: every data qubit reads back its stored state; no entangling
+    gates; ancillas are read out once per round like in the code."""
+    from qec.physical import build_physical_baseline, data_errors, round_gate_time_ns
+    ns = round_gate_time_ns()
+    assert 150 < ns < 600
+    for r in (0, 1, 3):
+        qc = build_physical_baseline(r, state, ns)
+        assert qc.num_clbits == 8 * r + 9
+        assert all(inst.operation.num_qubits == 1 or inst.operation.name == "barrier"
+                   for inst in qc.data)
+        mem = AerSimulator(method="stabilizer").run(qc, shots=32, memory=True,
+                                                    seed_simulator=2).result().get_memory()
+        assert not data_errors(memory_to_array(mem, qc.num_clbits), r, state).any()
+
+
+@pytest.mark.parametrize("basis", "ZX")
+def test_pauli_twirl_is_exact(basis):
+    """A twirled circuit has the same ideal behaviour as the untwirled one:
+    sampled noiselessly and converted with the UNTWIRLED reference (as the
+    hardware data are), no detector or observable ever fires - in Stim and
+    after translation to Qiskit (Aer). Seeds give different circuits, and the
+    twirl is fenced by barriers so the transpiler cannot cancel it."""
+    ref = build_memory_circuit(3, 3, basis, True, None)
+    circuits = []
+    for seed in range(4):
+        tw = build_memory_circuit(3, 3, basis, True, None, twirl_seed=seed)
+        circuits.append(str(tw))
+        det, obs = measurements_to_detections(tw.compile_sampler(seed=seed).sample(300), ref)
+        assert not det.any() and not obs.any()
+        assert tw.num_detectors == ref.num_detectors
+    assert len(set(circuits)) == 4
+    qc = stim_to_qiskit(build_memory_circuit(3, 2, basis, True, None, twirl_seed=9), barriers=False)
+    assert qc.count_ops().get("barrier", 0) == 2 * 4 * 2          # 2 per CZ layer, 4 layers, 2 rounds
+    ref2 = build_memory_circuit(3, 2, basis, True, None)
+    mem = AerSimulator(method="stabilizer").run(qc, shots=64, memory=True,
+                                                seed_simulator=1).result().get_memory()
+    det, obs = measurements_to_detections(memory_to_array(mem, ref2.num_measurements), ref2)
+    assert not det.any() and not obs.any()
+    # Same Pauli error, twirled or not: identical detection events.
+    noisy_ref = _inject_after_measurement(ref, 1, "Y_ERROR", 4)
+    noisy_tw = _inject_after_measurement(build_memory_circuit(3, 3, basis, True, None, twirl_seed=5),
+                                         1, "Y_ERROR", 4)
+    a = measurements_to_detections(noisy_ref.compile_sampler(seed=1).sample(8), ref)
+    b = measurements_to_detections(noisy_tw.compile_sampler(seed=1).sample(8), ref)
+    assert np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1])
+
+
+def test_calibrated_final_readout_prior():
+    """Per-qubit calibrated readout errors replace the generic readout only on
+    the given (data) qubits, as a classical misread, and lower decoding error
+    when they are the truth."""
+    code = RotatedSurfaceCode(3)
+    names = {q: f"QB{q + 1}" for q in range(code.num_qubits)}
+    errs = {f"QB{q + 1}": 0.002 for q in code.data_qubits}
+    base = NoiseModel.si1000(0.004)
+    m = base.with_readout_errors(errs, names, code.data_qubits)
+    assert all(m.meas(q) == 0 and m.meas_record(q) == 0.002 for q in code.data_qubits)
+    assert all(m.meas(a) == base.meas(a) and m.meas_record(a) == 0 for a in code.ancillas)
+    truth = build_memory_circuit(3, 2, "Z", True, m)
+    det, obs = truth.compile_detector_sampler(seed=4).sample(40_000, separate_observables=True)
+    right = decode(det, obs, truth).p_logical
+    wrong = decode(det, obs, build_memory_circuit(3, 2, "Z", True, base)).p_logical
+    assert right <= wrong + 0.002
+
+
+def test_final_readout_choice_only_touches_final_data_measurements():
+    """'fidelity' final readout swaps only the final data measurements to the
+    shelved high-fidelity readout; mid-circuit ancilla readouts stay QND and
+    every measurement keeps its classical-bit key."""
+    pytest.importorskip("iqm.pulse")
+    from iqm.pulse import Circuit, CircuitOperation
+    from qec.hardware import with_final_readout
+    rounds, n = 2, 2 * 8 + 9
+    ops = [CircuitOperation(name="prx", locus=("QB1",), args={"angle": 1.0, "phase": 0.0})]
+    ops += [CircuitOperation(name="measure", locus=(f"QB{j}",), args={"key": f"c_{n}_0_{j}"})
+            for j in range(n)]
+    out = with_final_readout(Circuit(name="t", instructions=tuple(ops)), 8 * rounds, "fidelity")
+    meas = [op for op in out.instructions if op.name.startswith("measure")]
+    assert [op.args["key"] for op in meas] == [f"c_{n}_0_{j}" for j in range(n)]
+    assert all(op.name == "measure" and op.implementation is None for op in meas[:16])
+    assert all(op.name == "measure_fidelity" and op.implementation == "shelved_constant"
+               for op in meas[16:])
+    assert out.instructions[0] == ops[0]
+
+
 @pytest.mark.parametrize("decoder", ["union_find", "bposd", "belief_matching"])
 def test_ldpc_decoders(decoder):
     """Union-Find, BP+OSD and belief-matching all correct errors in simulation,

@@ -17,7 +17,9 @@ Stim (native H+CZ, no-reset detectors) → Qiskit → zero-SWAP pinned transpile
 | `qec/layout.py` | **VF2 search over every SWAP-free embedding** of the code into the coupler graph, each scored by a Stim simulation under its own calibrated noise model (role-aware: which qubit is data / X / Z ancilla). | Low SWAPs, sophistication |
 | `qec/hardware.py` | Transpile with the layout pinned and `routing_method="none"` — the transpiler *cannot* insert a SWAP, and `swap_report` independently verifies every CZ sits on a physical coupler. One batched job per sweep (all round counts share one calibration), optional **IQM server-side dynamical decoupling**, raw per-shot data saved. | Low SWAPs, advanced features |
 | `qec/decode.py`, `qec/analysis.py` | MWPM and correlated MWPM (PyMatching) with the DEM built from the calibrated model; **binomial maximum-likelihood fit** of `P_L(n) = ½(1 − A(1−2ε_L)^n)` with Fisher-information errors, README form (A = 1) and free-A (SPAM-separated) form. | LER statistics |
-| `tests/` | 24 tests: determinism of every detector (proves the no-reset algebra), circuit distance = d, reset/no-reset give identical detection events for the same physical error, Qiskit translation reproduces Stim bit-for-bit under injected errors (Aer), layout nativeness, fit recovers a known ε. | Correctness |
+| `qec/physical.py` | **Physical-qubit baseline** on the same 9 data qubits: stores \|0⟩,\|1⟩,\|+⟩,\|−⟩ through the same per-round gate time and the same mid-circuit ancilla readouts, without encoding — the fair "no QEC" reference. | LER statistics |
+| `experiments/reproduce_all.py` | Regenerates every headline number from raw shots: independent numpy re-derivation of the no-reset detectors, Clopper-Pearson intervals, profile-likelihood intervals, G² goodness of fit (rejected fits are flagged), **held-out decoder/prior selection**. Output: `results/reproduced/summary.{md,json}`. | LER statistics |
+| `tests/` | 36 tests: determinism of every detector (proves the no-reset algebra), circuit distance = d, reset/no-reset give identical detection events for the same physical error, Qiskit translation reproduces Stim bit-for-bit under injected errors (Aer), independent detector re-derivation, layout nativeness, fit recovers a known ε with correct profile intervals and rejects a wrong model, physical-baseline circuits, portable calibration paths. | Correctness |
 
 ## Challenge entry points
 
@@ -37,18 +39,22 @@ against the hardware points (`results/figures/sim_vs_hardware.png`).
 
 ```bash
 python -m venv .venv && .venv/Scripts/python -m pip install -r requirements.txt
-.venv/Scripts/python -m pytest -q                       # 24 tests, ~15 s, no token
+.venv/Scripts/python -m pytest -q                       # 36 tests, ~20 s, no token
 
 # free, no token
+.venv/Scripts/python experiments/reproduce_all.py       # every headline number from raw shots (~10 min)
 .venv/Scripts/python experiments/simulate.py            # simulation baseline + figure
 .venv/Scripts/python experiments/layout.py --offline    # SWAP-free placement (snapshot + fake backend)
 .venv/Scripts/python experiments/run_hardware.py --fake --rounds 1 2 3 4 5 --shots 2000
 .venv/Scripts/python experiments/analyze.py results/hw/<file>.npz
 
 # real hardware: put IQM_TOKEN=... in .env (see .env.example)
-.venv/Scripts/python experiments/layout.py              # live calibration → best patch
+.venv/Scripts/python experiments/verify_circuits.py     # read-only: rebuild + check every executed circuit
+.venv/Scripts/python experiments/layout.py --out my_layout.json   # live calibration → ranked patches
 .venv/Scripts/python experiments/run_hardware.py --rounds 1 2 3 4 5 6 --shots 4000           # dry run
-.venv/Scripts/python experiments/run_hardware.py --rounds 1 2 3 4 5 6 --shots 4000 --dd both --confirm
+# --confirm SUBMITS REAL JOBS (spends credits):
+.venv/Scripts/python experiments/run_hardware.py --basis Z X --dd both --repeats 2 --shots 2000 --confirm
+.venv/Scripts/python experiments/run_physical_baseline.py --dd both --confirm
 .venv/Scripts/python experiments/analyze.py results/hw/*.npz
 ```
 

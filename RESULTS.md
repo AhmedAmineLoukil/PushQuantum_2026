@@ -9,8 +9,17 @@ shares one calibration. Uncertainties are 1σ binomial (points) and Fisher-infor
 
 **Definitions.** *P_L* = fraction of shots whose final, decoded logical value differs
 from the prepared one. *ε_L* = logical error per round, from a binomial-MLE fit of
-`2 P_L = 1 − (1 − 2 ε_L)^n` over n = 1…5 (the README's formula). "No correction" =
-the raw parity of the logical row of data qubits.
+`2 P_L = 1 − (1 − 2 ε_L)^n` over n = 1…5 (the README's formula). "No correction" /
+"raw parity" = the parity of the logical row of data qubits read from the *same encoded
+circuit* without decoding. It measures what the decoder adds on the same shots; it is
+**not** an unencoded-qubit baseline, and the exponential model fails for it (G² test
+p < 10⁻⁵ in most runs), so its "ε" is a descriptive number, not a per-round rate. The
+fair unencoded reference is the physical-qubit baseline in **S2** below.
+
+All numbers in this file are regenerated from the raw shots by
+`experiments/reproduce_all.py` → `results/reproduced/summary.md` (exact
+Clopper-Pearson point intervals, profile-likelihood fit intervals, G² goodness of fit,
+held-out decoder selection).
 
 ## Headline
 

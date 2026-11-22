@@ -36,6 +36,8 @@ def main():
     ap.add_argument("--shots", type=int, default=20_000)
     ap.add_argument("--top-k", type=int, default=64,
                     help="how many placements (best by proxy cost) to simulate")
+    ap.add_argument("--out", help="output file (default: results/layout_<qc>.json, which "
+                    "run_hardware.py uses - pass another path to avoid replacing it)")
     args = ap.parse_args()
     RESULTS.mkdir(exist_ok=True)
 
@@ -92,7 +94,7 @@ def main():
         "ranking": [{"qubits": sorted(s.physical_qubits(names)),
                      "predicted_p_l": s.predicted_p_l} for s in ranked],
     }
-    out_path = RESULTS / f"layout_{args.quantum_computer}.json"
+    out_path = Path(args.out) if args.out else RESULTS / f"layout_{args.quantum_computer}.json"
     out_path.write_text(json.dumps(out, indent=1))
     print(f"saved {out_path}")
 

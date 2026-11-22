@@ -67,10 +67,20 @@ def qubit_names(backend=None, n: int = 54) -> dict[int, str]:
 
 def fetch_calibration(backend, save: bool = True) -> dict:
     """Latest calibration fidelities via iqm-qubit-selector (dict of dicts:
-    CZ, CLIFFORD, 1Q, readout, readout_qndness, t1, t2). Cached to data/."""
-    from iqm.qubit_selector.qubit_selector import CalibrationDataManager
+    CZ, CLIFFORD, 1Q, readout, readout_qndness, t1, t2). Cached to data/.
 
-    cal = CalibrationDataManager().get_calibration_fidelities(backend)
+    Works with iqm-qubit-selector >= 2 (MetricsDataManager, used with
+    iqm-client >= 37; also reports readout QNDness) and with 1.x."""
+    try:
+        from iqm.qubit_selector.core.metrics_data import MetricsDataManager
+    except ImportError:                                  # iqm-qubit-selector 1.x
+        from iqm.qubit_selector.qubit_selector import CalibrationDataManager
+        cal = CalibrationDataManager().get_calibration_fidelities(backend)
+    else:
+        full = MetricsDataManager().get_full_metrics_data(backend.client)
+        cal = {"CZ": full.cz, "CLIFFORD": full.clifford, "1Q": full.single_qubit,
+               "readout": full.readout, "readout_qndness": full.readout_qndness,
+               "t1": full.t1, "t2": full.t2}
     cal = {k: {str(kk): float(vv) for kk, vv in v.items()} for k, v in cal.items()}
     if save:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -78,6 +88,42 @@ def fetch_calibration(backend, save: bool = True) -> dict:
         path.write_text(json.dumps({"fetched_at": stamp, "calibration": cal}, indent=1))
         (DATA_DIR / f"calibration_{backend.name}_latest.json").write_text(path.read_text())
     return cal
+
+
+def fetch_readout_metrics(backend, save: bool = True) -> dict:
+    """Per-qubit readout metrics of EVERY calibrated readout implementation.
+
+    Returns {"calibration_set_id", "fetched_at", "metrics": {"<gate>.<impl>":
+    {"QBx": {"assignment_error", "error_0_to_1", "error_1_to_0", "fidelity",
+    "qndness", "leakage", ...}}}} from the quality-metric set of the current
+    calibration (ssro = single-shot readout, rrc = repeated-readout QNDness).
+    Saved to data/readout_metrics_<qc>_<calibration set>.json.
+    """
+    import re
+    client = backend.client
+    arch = client.get_dynamic_quantum_architecture()
+    obs = client.get_quality_metric_set(arch.calibration_set_id).observations
+    pat = re.compile(r"^metrics\.(ssro|rrc)\.(measure\w*)\.(\w+)\.(QB\d+)\.([\w]+)$")
+    metrics: dict = {}
+    for o in obs:
+        m = pat.match(o.dut_field)
+        if not m:
+            continue
+        _, gate, impl, qubit, name = m.groups()
+        try:
+            metrics.setdefault(f"{gate}.{impl}", {}).setdefault(qubit, {})[name] = float(o.value)
+        except (TypeError, ValueError):
+            continue
+    out = {"calibration_set_id": str(arch.calibration_set_id),
+           "fetched_at": datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"), "metrics": metrics}
+    if save:
+        (DATA_DIR / f"readout_metrics_{backend.name}_{out['calibration_set_id']}.json").write_text(
+            json.dumps(out, indent=1))
+    return out
+
+
+def calibration_set_id(backend) -> str:
+    return str(backend.client.get_dynamic_quantum_architecture().calibration_set_id)
 
 
 def calibration_from_fake(backend) -> dict:
@@ -107,6 +153,45 @@ def load_calibration(quantum_computer: str = "emerald") -> dict | None:
     return json.loads(path.read_text())["calibration"]
 
 
+def resolve_calibration_file(path: str | Path | None) -> Path | None:
+    """Locate a run's frozen calibration file on *this* machine.
+
+    Older runs stored an absolute path from the machine that submitted them
+    (e.g. C:\\Users\\<someone>\\...\\data\\calibration_...json). We accept that
+    path if it exists, else a path relative to the repository, else the file
+    of the same name in data/. Returns None if none exists.
+    """
+    if not path:
+        return None
+    p = Path(str(path))
+    name = str(path).replace("\\", "/").rsplit("/", 1)[-1]
+    for cand in (p, DATA_DIR.parent / p, DATA_DIR / name):
+        try:
+            if cand.is_file():
+                return cand
+        except OSError:
+            continue
+    return None
+
+
+def run_calibration(run: dict, required: bool = False) -> dict | None:
+    """The calibration a saved run was planned with (None if unavailable)."""
+    f = resolve_calibration_file(run.get("calibration_file"))
+    if f is None:
+        if required:
+            raise FileNotFoundError(f"calibration for this run not found: {run.get('calibration_file')}")
+        return None
+    return json.loads(f.read_text())["calibration"]
+
+
+def repo_relative(path: Path) -> str:
+    """Path relative to the repository (portable across machines), POSIX style."""
+    try:
+        return Path(path).resolve().relative_to(DATA_DIR.parent).as_posix()
+    except ValueError:
+        return str(path)
+
+
 # ---------------------------------------------------------- stim -> qiskit
 def stim_to_qiskit(circuit: stim.Circuit, barriers: bool = True) -> QuantumCircuit:
     """Convert our native (H, CZ, M, R) Stim circuit to Qiskit.
@@ -134,7 +219,9 @@ def stim_to_qiskit(circuit: stim.Circuit, barriers: bool = True) -> QuantumCircu
                     "PAULI_CHANNEL_1", "PAULI_CHANNEL_2"):
             continue
         if name == "TICK":
-            if barriers and last_was_meas:
+            # TICK[barrier] (Pauli twirl around a CZ layer) is always a barrier:
+            # without it the transpiler could cancel the twirl across the CZ.
+            if (barriers and last_was_meas) or getattr(inst, "tag", "") == "barrier":
                 qc.barrier()
             last_was_meas = False
             continue
@@ -148,6 +235,9 @@ def stim_to_qiskit(circuit: stim.Circuit, barriers: bool = True) -> QuantumCircu
         if name == "H":
             for q in qs:
                 qc.h(q)
+        elif name in ("X", "Y", "Z"):
+            for q in qs:
+                getattr(qc, name.lower())(q)
         elif name == "CZ":
             for a, b in zip(qs[::2], qs[1::2]):
                 qc.cz(a, b)
@@ -228,10 +318,62 @@ def dd_options(enabled: bool, strategy: str = "standard"):
                                      dd_strategy=dd_strategy(strategy) if enabled else None)
 
 
+# Readout implementations selectable per measurement in a circuit job.
+# "qnd"      : IQM's default `measure` (constant). Most QND: the qubit stays in the
+#              measured state, which the no-reset ancillas rely on.
+# "fidelity" : `measure_fidelity` with shelving (|1> -> |2> before readout): lower
+#              assignment error but less QND, so only for the *final* data readout.
+READOUTS = {"qnd": ("measure", None),
+            "fidelity": ("measure_fidelity", "shelved_constant")}
+
+
+def _clbit_of(op) -> int:
+    return int(op.args["key"].rsplit("_", 1)[1])
+
+
+def with_final_readout(circuit, first_final_clbit: int, readout: str = "fidelity"):
+    """Copy of an IQM circuit whose measurements into clbits >= first_final_clbit
+    (the final data readout) use the given readout; mid-circuit ones are kept."""
+    from iqm.pulse import Circuit, CircuitOperation
+
+    name, impl = READOUTS[readout]
+    ops = []
+    for op in circuit.instructions:
+        if op.name == "measure" and _clbit_of(op) >= first_final_clbit:
+            op = CircuitOperation(name=name, locus=op.locus, args=dict(op.args), implementation=impl)
+        ops.append(op)
+    kwargs = {"name": circuit.name, "instructions": tuple(ops)}
+    if getattr(circuit, "metadata", None) is not None:
+        kwargs["metadata"] = circuit.metadata
+    return Circuit(**kwargs)
+
+
+def job_definition(backend, tqcs: list[QuantumCircuit], shots: int, dd: bool = False,
+                   dd_strategy_name: str = "standard", final_readout: str = "qnd",
+                   first_final_clbits: list[int] | None = None):
+    """The exact circuit job IQM receives (before server-side DD insertion)."""
+    jd = backend.create_circuit_job_definition(
+        tqcs, shots=shots, circuit_compilation_options=dd_options(dd, dd_strategy_name))
+    if final_readout != "qnd":
+        if first_final_clbits is None:
+            raise ValueError("first_final_clbits is needed to change the final readout")
+        jd = jd.model_copy(update={"circuits": [
+            with_final_readout(c, f, final_readout) for c, f in zip(jd.circuits, first_final_clbits)]})
+    return jd
+
+
 def submit(backend, tqcs: list[QuantumCircuit], shots: int, dd: bool = False,
-           dd_strategy_name: str = "standard"):
-    return backend.run(tqcs, shots=shots,
-                       circuit_compilation_options=dd_options(dd, dd_strategy_name))
+           dd_strategy_name: str = "standard", final_readout: str = "qnd",
+           first_final_clbits: list[int] | None = None):
+    if final_readout == "qnd":
+        return backend.run(tqcs, shots=shots,
+                           circuit_compilation_options=dd_options(dd, dd_strategy_name))
+    from iqm.qiskit_iqm.iqm_job import IQMJob
+
+    jd = job_definition(backend, tqcs, shots, dd, dd_strategy_name, final_readout, first_final_clbits)
+    job = IQMJob(backend, backend.client.submit_circuit_job(jd))
+    job.circuit_metadata = [getattr(c, "metadata", None) or {} for c in jd.circuits]
+    return job
 
 
 def memory_to_array(memory: list[str], num_measurements: int) -> np.ndarray:
@@ -254,9 +396,30 @@ def counts_to_array(counts: dict[str, int], num_measurements: int) -> np.ndarray
     return np.concatenate(rows, axis=0)
 
 
+def check_all_measurements_returned(job, circuits_num_meas: list[int]) -> None:
+    """Raise if the server returned fewer measurement keys than the circuit has.
+
+    qiskit-iqm fills classical bits whose measurement key is missing with 0
+    without warning. This happened for `measure_fidelity` in circuit jobs
+    (results/hw/invalid/README.md), so every collected job is checked."""
+    tracker = getattr(job, "_job_tracker", None)
+    if tracker is None:                       # fake backends / other SDK versions
+        return
+    try:
+        raw = tracker.result()
+    except Exception:                         # noqa: BLE001 - check is best-effort
+        return
+    per_circuit = getattr(raw, "circuit_measurement_results", raw)
+    for i, (res, nm) in enumerate(zip(per_circuit, circuits_num_meas)):
+        if len(res) != nm:
+            raise RuntimeError(f"circuit {i}: server returned {len(res)} measurement keys, "
+                               f"expected {nm} - missing results would be zero-filled")
+
+
 def job_to_arrays(job, circuits_num_meas: list[int], timeout: float | None = None
                   ) -> list[np.ndarray]:
     result = job.result(timeout=timeout) if timeout is not None else job.result()
+    check_all_measurements_returned(job, circuits_num_meas)
     out = []
     for i, nm in enumerate(circuits_num_meas):
         try:

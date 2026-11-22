@@ -27,9 +27,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from qec import build_memory_circuit  # noqa: E402
-from qec.hardware import (DATA_DIR, SERVER_URL, coupling_edges, get_backend,  # noqa: E402
-                          memory_to_array, save_run, stim_to_qiskit, swap_report,
-                          timestamp, transpile_pinned)
+from qec.hardware import (DATA_DIR, SERVER_URL, coupling_edges, fetch_calibration,  # noqa: E402
+                          get_backend, memory_to_array, repo_relative, save_run,
+                          stim_to_qiskit, swap_report, timestamp, transpile_pinned)
 
 RESULTS = Path(__file__).resolve().parent.parent / "results"
 
@@ -49,10 +49,32 @@ def dd_strategy(kind: str):
     return None
 
 
-def compile_for_pulla(pulla, backend, tqcs, shots: int, dd: str):
-    from iqm.pulla.utils_qiskit import qiskit_to_pulla
+class PulseAPI:
+    """Pulse-level entry points across IQM SDK versions.
 
-    circuits, compiler = qiskit_to_pulla(pulla, backend, tqcs)
+    iqm-client >= 37 folds pulse access into the client itself
+    (IQMClient.submit_playlist, iqm.qiskit_iqm.pulse_level_utils); older setups
+    use the separate iqm-pulla client (iqm.pulla.Pulla).
+    """
+
+    def __init__(self, backend, quantum_computer: str):
+        self.backend = backend
+        try:
+            from iqm.qiskit_iqm.pulse_level_utils import qiskit_to_iqm, sweep_job_to_qiskit
+        except ImportError:                                     # iqm-client < 37 + iqm-pulla
+            from iqm.pulla.pulla import Pulla
+            from iqm.pulla.utils_qiskit import qiskit_to_pulla, sweep_job_to_qiskit
+            pulla = Pulla(SERVER_URL, quantum_computer=quantum_computer)
+            self.convert = lambda tqcs: qiskit_to_pulla(pulla, backend, tqcs)
+            self.submit = pulla.submit_playlist
+        else:
+            self.convert = lambda tqcs: qiskit_to_iqm(backend, tqcs)
+            self.submit = backend.client.submit_playlist
+        self.to_qiskit = sweep_job_to_qiskit
+
+
+def compile_for_pulla(api: PulseAPI, tqcs, shots: int, dd: str):
+    circuits, compiler = api.convert(tqcs)
     settings = compiler.get_settings(circuits=circuits)
     settings.set_shots(shots)
     settings.stages.dynamical_decoupling.apply_dd_strategy.dd_is_disabled = dd == "off"
@@ -82,14 +104,11 @@ def main():
     ap.add_argument("--wait", type=float, default=6 * 3600)
     args = ap.parse_args()
 
-    from iqm.pulla.pulla import Pulla
-    from iqm.pulla.utils_qiskit import sweep_job_to_qiskit
-
     layout_path = Path(args.layout or RESULTS / f"layout_{args.quantum_computer}.json")
     lay_info = json.loads(layout_path.read_text())
     layout = {int(k): v for k, v in lay_info["layout"].items()}
     backend = get_backend(args.quantum_computer)
-    pulla = Pulla(SERVER_URL, quantum_computer=args.quantum_computer)
+    api = PulseAPI(backend, args.quantum_computer)
 
     circuits, tqcs = [], []
     for r in args.rounds:
@@ -100,7 +119,7 @@ def main():
         circuits.append(c)
         tqcs.append(tqc)
 
-    run_def, context = compile_for_pulla(pulla, backend, tqcs, args.shots, args.dd)
+    run_def, context = compile_for_pulla(api, tqcs, args.shots, args.dd)
     data_q = lay_info["physical"]["4"]          # centre data qubit
     print(f"compiled {len(tqcs)} circuits with DD={args.dd}: centre data qubit {data_q} "
           f"gets {drive_pulse_count(run_def, data_q)} drive pulses in the {args.rounds[-1]}-round circuit")
@@ -108,7 +127,8 @@ def main():
         print("compile only - add --confirm to submit")
         return
 
-    job = pulla.submit_playlist(run_def, context=context)
+    live_cal = fetch_calibration(backend, save=False)   # calibration at submission time
+    job = api.submit(run_def, context=context)
     stamp = timestamp()
     print(f"submitted pulse job {job.job_id}", flush=True)
     pending = RESULTS / "hw" / f"pending_pulla_{stamp}_{args.quantum_computer}_{args.basis}_{args.dd}.json"
@@ -126,18 +146,17 @@ def main():
             raise SystemExit(f"still {job.status} after {args.wait}s; job id in {pending}")
         time.sleep(15)
 
-    result = sweep_job_to_qiskit(job, shots=args.shots)
+    result = api.to_qiskit(job, shots=args.shots)
     arrays = [memory_to_array(result.get_memory(i), c.num_measurements)
               for i, c in enumerate(circuits)]
-    cal = json.loads((DATA_DIR / f"calibration_{args.quantum_computer}_latest.json").read_text())
     cal_file = DATA_DIR / f"calibration_{args.quantum_computer}_run{stamp}.json"
-    cal_file.write_text(json.dumps(cal))
+    cal_file.write_text(json.dumps({"fetched_at": stamp, "calibration": live_cal}))
     path = RESULTS / "hw" / f"{stamp}_{args.quantum_computer}_{args.basis}_pulla-{args.dd}.npz"
     save_run(path, rounds=args.rounds, basis=args.basis, shots=args.shots,
              dd=args.dd != "off", pulse_level=True, dd_strategy=args.dd,
              job_id=str(job.job_id), quantum_computer=args.quantum_computer, fake=False,
              layout=lay_info["layout"], physical=lay_info["physical"],
-             calibration_file=str(cal_file), depths=[t.depth() for t in tqcs],
+             calibration_file=repo_relative(cal_file), depths=[t.depth() for t in tqcs],
              **{f"raw_r{r}": a for r, a in zip(args.rounds, arrays)})
     print(f"saved {path}")
 

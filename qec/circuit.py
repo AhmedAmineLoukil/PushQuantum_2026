@@ -33,14 +33,61 @@ from .code import RotatedSurfaceCode
 from .noise import NoiseModel
 
 
+_CZ = stim.Circuit("CZ 0 1")
+_PAULIS = ("I", "X", "Y", "Z")
+
+
 class _Builder:
-    def __init__(self, n_qubits: int, noise: NoiseModel | None, native: str):
+    def __init__(self, n_qubits: int, noise: NoiseModel | None, native: str,
+                 twirl_seed: int | None = None):
         self.c = stim.Circuit()
         self.n = n_qubits
         self.noise = noise
         self.native = native
         self.frame: set[int] = set()
         self.num_meas = 0
+        self.rng = None
+        if twirl_seed is not None:
+            import random
+            self.rng = random.Random(twirl_seed)
+
+    # ------------------------------------------------------------- twirling
+    def _paulis(self, ops: dict[int, str]):
+        for p in "XYZ":
+            qs = sorted(q for q, o in ops.items() if o == p)
+            if qs:
+                self.c.append(p, qs)
+
+    def twirled_cz(self, pairs):
+        """CZ layer wrapped in a random Pauli twirl.
+
+        Before the CZ: a uniformly random two-qubit Pauli P on each pair.
+        After it: CZ P CZ^dagger (a Pauli), which undoes P exactly, so the
+        ideal circuit and every measurement distribution are unchanged. Noise
+        on the CZ is twirled into a Pauli channel. The TICK[barrier] tags
+        become Qiskit barriers so the transpiler cannot cancel the twirl
+        across the CZ, while the Paulis can still merge with neighbouring
+        single-qubit gates. Twirl Paulis carry no simulated noise: they are
+        merged into existing PRX gates or are virtual Z on hardware.
+        """
+        before, after = {}, {}
+        for a, b in pairs:
+            pa, pb = self.rng.choice(_PAULIS), self.rng.choice(_PAULIS)
+            before[a], before[b] = pa, pb
+            conj = stim.PauliString(pa + pb).after(_CZ)
+            after[a], after[b] = "IXYZ"[conj[0]], "IXYZ"[conj[1]]
+        self._paulis(before)
+        self.c.append(stim.CircuitInstruction("TICK", [], tag="barrier"))
+        flat = [q for p in pairs for q in p]
+        self.c.append("CZ", flat)
+        if self.noise is not None:
+            for a, b in pairs:
+                if self.noise.gate2(a, b) > 0:
+                    self.c.append("DEPOLARIZE2", [a, b], self.noise.gate2(a, b))
+            self._idle(set(flat), self.noise.dur_2q)
+        self.c.append(stim.CircuitInstruction("TICK", [], tag="barrier"))
+        self._paulis(after)
+        self.c.append("TICK")
 
     # ---------------------------------------------------------------- noise
     def _idle(self, busy: set[int], duration: float):
@@ -134,7 +181,10 @@ class _Builder:
                 fix.add(tgt)
         self.h(fix)
         self.frame ^= fix
-        self.two_qubit("CZ", pairs)
+        if self.rng is not None:
+            self.twirled_cz(pairs)
+        else:
+            self.two_qubit("CZ", pairs)
 
     # ------------------------------------------------------------ annotations
     def rec(self, absolute: int) -> stim.GateTarget:
@@ -152,6 +202,7 @@ def build_memory_circuit(
     noise: NoiseModel | None = None,
     native: str = "cz",
     code: RotatedSurfaceCode | None = None,
+    twirl_seed: int | None = None,
 ) -> stim.Circuit:
     """Rotated surface-code memory experiment.
 
@@ -163,6 +214,10 @@ def build_memory_circuit(
     no_reset : True -> ancillas are never reset (required on Emerald)
     noise    : None for the hardware circuit, a NoiseModel for simulation/DEM
     native   : "cz" (H + CZ, what Emerald runs) or "cx" (textbook CX circuit)
+    twirl_seed : None, or a seed for a random Pauli twirl of every CZ layer
+               (native "cz" only). The twirl is undone exactly, so detectors,
+               observable and the decoder's DEM are those of the untwirled
+               circuit; only the physical noise is randomised.
     """
     basis = basis.upper()
     if basis not in ("X", "Z"):
@@ -172,8 +227,10 @@ def build_memory_circuit(
     if native not in ("cz", "cx"):
         raise ValueError("native must be 'cz' or 'cx'")
 
+    if twirl_seed is not None and native != "cz":
+        raise ValueError("twirling is implemented for the native CZ circuit")
     code = code or RotatedSurfaceCode(distance)
-    b = _Builder(code.num_qubits, noise, native)
+    b = _Builder(code.num_qubits, noise, native, twirl_seed)
     for q, (x, y) in code.coords.items():
         b.c.append("QUBIT_COORDS", [q], [x, y])
 

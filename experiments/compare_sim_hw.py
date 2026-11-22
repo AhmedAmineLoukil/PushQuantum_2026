@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from qec import NoiseModel, RotatedSurfaceCode, build_memory_circuit  # noqa: E402
 from qec.analysis import fit_ler  # noqa: E402
 from qec.decode import decode, measurements_to_detections  # noqa: E402
-from qec.hardware import load_run  # noqa: E402
+from qec.hardware import load_run, run_calibration  # noqa: E402
 from qec.learn import cross_validated_decode, summarize_learned  # noqa: E402
 
 FIG = Path(__file__).resolve().parent.parent / "results" / "figures"
@@ -73,7 +73,7 @@ def main():
         run = load_run(Path(path))
         rounds = [int(x) for x in run["rounds"]]
         basis = run["basis"]
-        cal = json.loads(Path(run["calibration_file"]).read_text())["calibration"]
+        cal = run_calibration(run, required=True)
         phys = {int(k): v for k, v in run["physical"].items()}
         m_cal = NoiseModel.from_calibration(cal, phys)
 

@@ -4,12 +4,12 @@
 # --- IQM hardware access (Resonance) ---
 # [qiskit] -> iqm.qiskit_iqm (IQMProvider)
 # [qrisp]  -> iqm.qrisp_iqm  (DetectorExperiment, IQMBackend, vf2pp_layout, ...)
-iqm-client[qiskit,qrisp]==35.0.3
+iqm-client[qiskit,qrisp]==37.0.0   # latest, as asked by the IQM mentors
 
 # --- Circuit frameworks ---
-qiskit==2.1.2                  # iqm-client 35.0.3 requires qiskit < 2.2
+qiskit==2.1.2                  # newest qiskit iqm-client 37.0.0 resolves to
 qiskit-aer==0.17.2
-qrisp==0.9.9
+qrisp==0.9.10
 jax==0.7.1
 jaxlib==0.7.1
 
@@ -22,10 +22,10 @@ numpy==2.2.6                   # ldpc (BP+OSD, Union-Find) needs numpy<=2.2.6
 matplotlib==3.11.2
 
 # --- Calibration-aware qubit selection (iqm_utils/get_calibration_data.py) ---
-iqm-qubit-selector
+iqm-qubit-selector==2.0.0
 
 # --- Optional: pulse-level extension (needs a paid Resonance organisation, ask your mentors!) ---
-# iqm-pulla==14.0.3
+# iqm-pulla==16.0.0   (needs an organisation token with pulse access)
 
 # --- Ours ---
 pytest

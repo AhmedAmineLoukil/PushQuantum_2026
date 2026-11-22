@@ -66,6 +66,17 @@ def decode(
               "none"       - no correction: raw logical flip rate (a baseline
                              that shows how much the decoder actually helps)
     """
+    fail = decode_failures(det_events, obs_flips, noisy_circuit, decoder)
+    return DecodeResult(decoder, len(fail), int(fail.sum()))
+
+
+def decode_failures(
+    det_events: np.ndarray,
+    obs_flips: np.ndarray,
+    noisy_circuit: stim.Circuit,
+    decoder: str = "mwpm",
+) -> np.ndarray:
+    """Per-shot logical failure (bool array of length shots); see `decode`."""
     det_events = np.asarray(det_events, dtype=bool)
     obs_flips = np.asarray(obs_flips, dtype=bool).reshape(len(det_events), -1)
     if det_events.shape[1] != noisy_circuit.num_detectors:
@@ -84,8 +95,7 @@ def decode(
         # Correlated matching must be requested both when building the graph
         # and when decoding (two-pass reweighting happens at decode time).
         pred = matcher.decode_batch(det_events, enable_correlations=correlated)
-    errors = int(np.any(pred != obs_flips, axis=1).sum())
-    return DecodeResult(decoder, len(det_events), errors)
+    return np.any(pred != obs_flips, axis=1)
 
 
 def measurements_to_detections(raw_meas: np.ndarray, circuit: stim.Circuit):

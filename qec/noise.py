@@ -168,6 +168,26 @@ class NoiseModel:
             m.p_meas_q[q] = 0.0
         return m
 
+    def with_readout_errors(self, errors: dict[str, float], qubit_names: dict[int, str],
+                            qubits: list[int], floor: float = 1e-4) -> "NoiseModel":
+        """Copy of this model whose readout of `qubits` is a classical misread
+        with the given per-qubit probability (physical name -> assignment error),
+        e.g. the calibrated assignment error of the readout implementation that
+        was actually used. Meant for the final data readout, where nothing runs
+        after the measurement, so a misread and a pre-measurement flip have the
+        same effect on the record and the misread form is the honest one."""
+        from copy import deepcopy
+
+        m = deepcopy(self)
+        for q in qubits:
+            p = errors.get(qubit_names[q])
+            if p is None:
+                continue
+            m.p_meas_q[q] = 0.0
+            m.p_meas_state_q.pop(q, None)
+            m.p_meas_record_q[q] = max(float(p), floor)
+        return m
+
     def idle(self, q: int, duration_us: float) -> tuple[float, float, float] | None:
         """Pauli-twirled (px, py, pz) for idling `duration_us`, or None."""
         t1 = self.t1_q.get(q, self.t1)
